@@ -554,6 +554,14 @@ function renderDealTab(){
         ${inputField('Marktpreis "hoch"', "marktpreis_h", d.marktpreis_h, "€/m²")}
       </div>
 
+      <div class="subhint" style="margin-top:10px">
+        Schnell prüfen: 
+        <a class="btn btn--ghost" href="${MARKETPRICE_URL}" target="_blank" rel="noopener noreferrer">
+          Immowelt Marktpreise öffnen
+        </a>
+      </div>
+
+
       <div class="hr"></div>
       <div class="grid grid--2">
         ${inputField("Notar+Grundbuch", "notar_pct", d.notar_pct, "%", {isPct:true})}
