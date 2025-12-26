@@ -498,7 +498,7 @@ function renderDealTab(){
   const c = compute(d);
 
   el.innerHTML = [
-    card("Eingaben (hellblau) – wie die Excel-Felder", `
+    card("Eingabe", `
       <div class="grid grid--2">
         ${textField("Deal-Name", "name", d.name)}
         ${textField("Stadt/Ort", "city", d.city)}
