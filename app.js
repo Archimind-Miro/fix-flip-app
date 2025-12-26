@@ -1,30 +1,31 @@
 /*
-README (Kurz)
-- Diese App ist eine statische PWA (keine Build-Tools).
-- Speicherung: localStorage (Deals & Einstellungen).
-- Hosting kostenlos über GitHub Pages.
-- Installation am Handy:
-  Android/Chrome: Menü → „Zum Startbildschirm hinzufügen“
-  iOS/Safari: Teilen → „Zum Home-Bildschirm“
+Fix & Flip Rechner – app.js (komplett)
+- Statische PWA ohne Build-Tools
+- Speicherung lokal im Browser (localStorage)
+- Fokus-stabil: beim Tippen werden nur berechnete Tabs neu gerendert
 */
 
-const LS_KEY = "ff_deals_v1";
-const LS_ACTIVE = "ff_active_deal_v1";
-const LS_COMPARE = "ff_compare_v1";
+const LS_KEY = "ff_deals_v2";
+const LS_ACTIVE = "ff_active_deal_v2";
+const LS_COMPARE = "ff_compare_v2";
 
 const DISCOUNTS = [0.10,0.15,0.20,0.25,0.30,0.35,0.40,0.45];
 
-function deEUR(n){ return new Intl.NumberFormat("de-DE",{style:"currency",currency:"EUR"}).format(n); }
-function deNum(n){ return new Intl.NumberFormat("de-DE").format(n); }
+function deEUR(n){
+  if (!isFinite(n)) return "–";
+  return new Intl.NumberFormat("de-DE",{style:"currency",currency:"EUR"}).format(n);
+}
 function dePct(n){
   if (!isFinite(n)) return "–";
   return new Intl.NumberFormat("de-DE",{style:"percent",minimumFractionDigits:1,maximumFractionDigits:1}).format(n);
 }
 function clamp0(x){
-  const v = Number(String(x).replace(",", "."));
+  const v = Number(String(x ?? "").replace(",", "."));
   return isFinite(v) ? Math.max(0, v) : 0;
 }
-function uid(){ return Math.random().toString(16).slice(2) + Date.now().toString(16); }
+function uid(){
+  return Math.random().toString(16).slice(2) + Date.now().toString(16);
+}
 
 function defaultDeal(){
   return {
@@ -33,74 +34,57 @@ function defaultDeal(){
     city: "",
     createdAt: new Date().toISOString(),
 
-    // Objekt & Markt (blanko)
+    // Objekt & Markt
     kaufpreis: 0,
     wohnflaeche: 0,
     marktpreis_g: 0,
     marktpreis_h: 0,
 
-    // Ankauf-NK (du kannst hier Default-Prozente lassen, wenn du willst)
+    // Ankauf-NK (Standardannahmen – wie Excel üblich)
     notar_pct: 0.015,
     makler_ankauf_pct: 0.036,
     grest_pct: 0.065,
 
-    // Renovierung (blanko)
+    // Renovierung
     entruempelung: 0,
     renovierung: 0,
     puffer_pct: 0.10,
     kueche: 0,
     sonstiges: 0,
 
-    // Finanzierung (du kannst Defaults lassen)
+    // Finanzierung
     projektdauer_monate: 8,
     finanzierungsquote: 1.0,
     zins_pa: 0.055,
     bearb_pct: 0.01,
     fin_sonst_pct: 0,
 
-    // Laufende Kosten (blanko)
+    // Laufende Kosten
     hausgeld_monat: 0,
     strom_heizung_monat: 0,
 
-    // Verkauf (blanko)
+    // Verkauf
     verkauf_makler_fix: 0,
     coinvestor_pct: 0,
     homestaging_fix: 0,
 
-    // Vermietung (blanko)
+    // Vermietung
     pot_miete_qm: 0,
-    kaeufer_zins_tilg_pa: 0.054,
+    kaeufer_zins_tilg_pa: 0.054
   };
 }
 
+// ---------- Storage ----------
 function loadDeals(){
   const raw = localStorage.getItem(LS_KEY);
-  if (!raw) {
-    const d1 = defaultDeal();
-    const d2 = defaultDeal();
-    d2.id = uid();
-    d2.name = "Szenario – höherer VK & mehr Renovierung";
-    d2.marktpreis_g = 2850;
-    d2.marktpreis_h = 3000;
-    d2.renovierung = 38000;
-    const arr = [d1, d2];
-    localStorage.setItem(LS_KEY, JSON.stringify(arr));
-    localStorage.setItem(LS_ACTIVE, d1.id);
-    return arr;
-  }
+  if (!raw) return [];
   try { return JSON.parse(raw) || []; } catch { return []; }
 }
-
 function saveDeals(deals){
   localStorage.setItem(LS_KEY, JSON.stringify(deals));
 }
-
-function getActiveId(){
-  return localStorage.getItem(LS_ACTIVE);
-}
-function setActiveId(id){
-  localStorage.setItem(LS_ACTIVE, id);
-}
+function getActiveId(){ return localStorage.getItem(LS_ACTIVE); }
+function setActiveId(id){ localStorage.setItem(LS_ACTIVE, id); }
 
 function getCompareIds(){
   try { return JSON.parse(localStorage.getItem(LS_COMPARE) || "[]"); } catch { return []; }
@@ -109,9 +93,8 @@ function setCompareIds(ids){
   localStorage.setItem(LS_COMPARE, JSON.stringify(ids.slice(0,3)));
 }
 
-// --- Excel-Logik (nach deinem Template) ---
+// ---------- Compute (Excel-Logik, template-nah) ----------
 function compute(deal){
-  // Inputs
   const kaufpreis = clamp0(deal.kaufpreis);
   const wf = Math.max(1e-9, clamp0(deal.wohnflaeche));
   const markt_g = clamp0(deal.marktpreis_g);
@@ -171,11 +154,11 @@ function compute(deal){
   // Gesamtinvest
   const INV = AnkaufGesamt + RenoGesamt + FinGesamt + LaufendeKosten;
 
-  // Gewinn / Marge (Basisblock)
+  // Gewinn / Marge
   const Gewinn_g = VK_g - INV - (coinvestor_pct * VK_g) - homestaging_fix - verkauf_makler_fix;
   const Gewinn_h = VK_h - INV - (coinvestor_pct * VK_h) - homestaging_fix - verkauf_makler_fix;
 
-  // Marge-Formel aus Excel (inkl. coinvestor_pct als additiver Term wie im Template; bewusst 1:1)
+  // Template-nahe Marge (wie in deiner Datei implementiert)
   const baseDen = (INV + verkauf_makler_fix + coinvestor_pct + homestaging_fix);
   const Marge_g = baseDen > 0 ? (VK_g - baseDen) / baseDen : NaN;
   const Marge_h = baseDen > 0 ? (VK_h - baseDen) / baseDen : NaN;
@@ -191,30 +174,26 @@ function compute(deal){
   const negotiation = DISCOUNTS.map(r => {
     const Kaufpreis_r = kaufpreis * (1 - r);
 
-    // INVEST_r rechnet Finanzierung auf Kaufpreis_r (nicht Finanzbetrag)
+    // INVEST_r: Finanzierung auf Kaufpreis_r (nicht Finanzbetrag)
     const INVEST_r =
       (Kaufpreis_r + ((grest_pct + makler_pct + notar_pct) * Kaufpreis_r))
       + ((fin_sonst_pct * Kaufpreis_r) + (bearb_pct * Kaufpreis_r) + ((zins_pa * Kaufpreis_r / 12) * monate))
       + RenoGesamt
       + (MonatlicheKosten * monate);
 
-    // Gewinn_g_r ohne Verkaufsmakler_fix (Excel E32)
+    // Gewinn gering ohne Verkaufsmakler_fix (wie Excel-Verhandlung)
     const Gewinn_g_r = VK_g - INVEST_r - (coinvestor_pct * VK_g) - homestaging_fix;
 
-    // Marge_g_r (Excel G32)
     const den_r = (INVEST_r + verkauf_makler_fix + coinvestor_pct + homestaging_fix);
     const Marge_g_r = den_r > 0 ? (VK_g - den_r) / den_r : NaN;
 
-    // Gewinn_h_r nutzt coinvestor_pct * VK_g (Excel L32)
+    // Gewinn hoch nutzt coinvestor_pct * VK_g (Excel-Eigenheit)
     const Gewinn_h_r = VK_h - INVEST_r - (coinvestor_pct * VK_g) - homestaging_fix;
-
-    // Marge_h_r (Excel N32)
     const Marge_h_r = den_r > 0 ? (VK_h - den_r) / den_r : NaN;
 
     return { r, Kaufpreis_r, INVEST_r, Gewinn_g_r, Marge_g_r, Gewinn_h_r, Marge_h_r };
   });
 
-  // Beste Marge markieren
   let bestIdx = 0;
   let bestVal = -Infinity;
   negotiation.forEach((x,i)=>{
@@ -235,74 +214,8 @@ function compute(deal){
   };
 }
 
-// --- UI ---
+// ---------- UI helpers ----------
 const $ = (sel) => document.querySelector(sel);
-
-let deals = loadDeals();
-let activeId = getActiveId() || (deals[0]?.id);
-if (!activeId && deals[0]) activeId = deals[0].id;
-if (activeId) setActiveId(activeId);
-
-function activeDeal(){
-  return deals.find(d => d.id === getActiveId()) || deals[0];
-}
-
-function setField(key, value){
-  const d = activeDeal();
-  if (!d) return;
-  // Prozentfelder: erlauben Eingabe in % (z.B. 1,5) ODER als Dezimal (0,015)
-  const pctFields = new Set(["notar_pct","makler_ankauf_pct","grest_pct","puffer_pct","finanzierungsquote","zins_pa","bearb_pct","fin_sonst_pct","coinvestor_pct","kaeufer_zins_tilg_pa"]);
-  let v = String(value).trim();
-  let num = clamp0(v);
-
-  if (pctFields.has(key)) {
-    // Heuristik: wenn user 1.5 eingibt -> 0.015; wenn 0.015 eingibt -> 0.015
-    if (num > 1) num = num / 100;
-  }
-
-  d[key] = num;
-  saveDeals(deals);
-  renderAll();
-}
-
-function setTextField(key, value){
-  const d = activeDeal();
-  if (!d) return;
-  d[key] = String(value);
-  saveDeals(deals);
-  renderAll(false);
-}
-
-function createDeal(){
-  const d = defaultDeal();
-  d.name = "Neuer Deal";
-  deals.unshift(d);
-  saveDeals(deals);
-  setActiveId(d.id);
-  renderAll();
-}
-
-function duplicateDeal(id){
-  const src = deals.find(d=>d.id===id);
-  if (!src) return;
-  const copy = JSON.parse(JSON.stringify(src));
-  copy.id = uid();
-  copy.createdAt = new Date().toISOString();
-  copy.name = `${src.name} (Kopie)`;
-  deals.unshift(copy);
-  saveDeals(deals);
-  setActiveId(copy.id);
-  renderAll();
-}
-
-function deleteDeal(id){
-  const idx = deals.findIndex(d=>d.id===id);
-  if (idx < 0) return;
-  deals.splice(idx,1);
-  if (deals[0]) setActiveId(deals[0].id);
-  saveDeals(deals);
-  renderAll();
-}
 
 function ampBadge(marge){
   if (!isFinite(marge)) return `<span class="badge">–</span>`;
@@ -314,45 +227,209 @@ function ampBadge(marge){
 function card(title, inner){
   return `<div class="card"><div class="card__title">${title}</div>${inner}</div>`;
 }
-function field(label, key, value, hint){
+
+// Eingabefelder optisch markieren (hellblau)
+function inputField(label, key, value, hint){
   return `
     <div class="field">
-      <label>
-        <span>${label}</span>
-        <small>${hint || ""}</small>
-      </label>
-      <input type="number" inputmode="decimal" value="${value}" data-key="${key}" />
+      <label><span>${label}</span><small>${hint || ""}</small></label>
+      <input class="ff-input" type="number" inputmode="decimal" value="${value}" data-key="${key}" />
     </div>`;
 }
 function textField(label, key, value, hint){
   return `
     <div class="field">
-      <label>
-        <span>${label}</span>
-        <small>${hint || ""}</small>
-      </label>
-      <input type="text" value="${value || ""}" data-tkey="${key}" />
+      <label><span>${label}</span><small>${hint || ""}</small></label>
+      <input class="ff-input" type="text" value="${value || ""}" data-tkey="${key}" />
     </div>`;
 }
+function readonlyRow(label, value){
+  return `<div class="row"><div class="l">${label}</div><div class="r">${value}</div></div>`;
+}
 
+function ensureInputStyle(){
+  // falls styles.css noch nicht angepasst ist: minimaler Inline-Style-Injector
+  if (document.getElementById("ff-input-style")) return;
+  const s = document.createElement("style");
+  s.id = "ff-input-style";
+  s.textContent = `
+    .ff-input{
+      background: rgba(59,130,246,.10);
+      border-color: rgba(59,130,246,.25) !important;
+    }
+    .ff-input:focus{
+      outline: none;
+      box-shadow: 0 0 0 4px rgba(59,130,246,.15);
+    }
+  `;
+  document.head.appendChild(s);
+}
+
+// ---------- App state ----------
+let deals = loadDeals();
+if (!deals || deals.length === 0) {
+  const d = defaultDeal();
+  deals = [d];
+  saveDeals(deals);
+  setActiveId(d.id);
+} else {
+  if (!getActiveId()) setActiveId(deals[0].id);
+}
+
+function activeDeal(){
+  const id = getActiveId();
+  return deals.find(d => d.id === id) || deals[0];
+}
+
+function persist(){
+  saveDeals(deals);
+}
+
+// Prozentfelder (Eingabe als % oder Dezimal)
+const pctFields = new Set([
+  "notar_pct","makler_ankauf_pct","grest_pct","puffer_pct",
+  "finanzierungsquote","zins_pa","bearb_pct","fin_sonst_pct",
+  "coinvestor_pct","kaeufer_zins_tilg_pa"
+]);
+
+function setField(key, value){
+  const d = activeDeal();
+  if (!d) return;
+
+  let num = clamp0(String(value).trim());
+  if (pctFields.has(key) && num > 1) num = num / 100;
+
+  d[key] = num;
+  persist();
+
+  // Fokus stabil: beim Tippen im Deal-Tab nur berechnete Tabs aktualisieren
+  const activeEl = document.activeElement;
+  const isTypingInDeal = activeEl && activeEl.closest && activeEl.closest("#deal");
+  if (isTypingInDeal) renderComputedOnly();
+  else renderAll(false);
+}
+
+function setTextFieldValue(key, value){
+  const d = activeDeal();
+  if (!d) return;
+
+  d[key] = String(value);
+  persist();
+
+  const activeEl = document.activeElement;
+  const isTypingInDeal = activeEl && activeEl.closest && activeEl.closest("#deal");
+  if (isTypingInDeal) renderComputedOnly();
+  else renderAll(false);
+}
+
+function createDeal(){
+  const d = defaultDeal();
+  deals.unshift(d);
+  persist();
+  setActiveId(d.id);
+  renderAll(false);
+}
+
+function duplicateDeal(id){
+  const src = deals.find(x => x.id === id);
+  if (!src) return;
+  const copy = JSON.parse(JSON.stringify(src));
+  copy.id = uid();
+  copy.createdAt = new Date().toISOString();
+  copy.name = `${src.name} (Kopie)`;
+  deals.unshift(copy);
+  persist();
+  setActiveId(copy.id);
+  renderAll(false);
+}
+
+function deleteDeal(id){
+  const idx = deals.findIndex(x => x.id === id);
+  if (idx < 0) return;
+  deals.splice(idx, 1);
+  if (!deals.length) {
+    const d = defaultDeal();
+    deals = [d];
+  }
+  persist();
+  setActiveId(deals[0].id);
+  renderAll(false);
+}
+
+// ---------- Render ----------
 function renderDealTab(){
+  ensureInputStyle();
   const d = activeDeal();
   if (!d) return;
   const c = compute(d);
 
   const el = $("#deal");
   el.innerHTML = [
-    card("Deal auswählen", `
+    card("Eingaben (hellblau) – wie die Excel-Felder", `
       <div class="grid grid--2">
-        ${textField("Name", "name", d.name)}
+        ${textField("Deal-Name", "name", d.name)}
         ${textField("Stadt/Ort", "city", d.city)}
       </div>
+      <div class="hr"></div>
+
+      <div class="grid grid--2">
+        ${inputField("Kaufpreis", "kaufpreis", d.kaufpreis, "EUR")}
+        ${inputField("Wohnfläche", "wohnflaeche", d.wohnflaeche, "m²")}
+        ${inputField('Marktpreis "gering"', "marktpreis_g", d.marktpreis_g, "€/m²")}
+        ${inputField('Marktpreis "hoch"', "marktpreis_h", d.marktpreis_h, "€/m²")}
+      </div>
+
+      <div class="hr"></div>
+      <div class="grid grid--2">
+        ${inputField("Notar+Grundbuch", "notar_pct", d.notar_pct*100, "%")}
+        ${inputField("Makler Ankauf", "makler_ankauf_pct", d.makler_ankauf_pct*100, "%")}
+        ${inputField("GrESt", "grest_pct", d.grest_pct*100, "%")}
+      </div>
+
+      <div class="hr"></div>
+      <div class="grid grid--2">
+        ${inputField("Entrümpelung", "entruempelung", d.entruempelung, "EUR")}
+        ${inputField("Renovierung", "renovierung", d.renovierung, "EUR")}
+        ${inputField("Sicherheitspuffer", "puffer_pct", d.puffer_pct*100, "%")}
+        ${inputField("Küche", "kueche", d.kueche, "EUR")}
+        ${inputField("Sonstiges", "sonstiges", d.sonstiges, "EUR")}
+      </div>
+
+      <div class="hr"></div>
+      <div class="grid grid--2">
+        ${inputField("Projektdauer", "projektdauer_monate", d.projektdauer_monate, "Monate")}
+        ${inputField("Finanzierungsquote", "finanzierungsquote", d.finanzierungsquote*100, "%")}
+        ${inputField("Zins p.a.", "zins_pa", d.zins_pa*100, "%")}
+        ${inputField("Bearbeitungsgebühr", "bearb_pct", d.bearb_pct*100, "%")}
+        ${inputField("Provision/Sonst", "fin_sonst_pct", d.fin_sonst_pct*100, "%")}
+      </div>
+
+      <div class="hr"></div>
+      <div class="grid grid--2">
+        ${inputField("Hausgeld / Monat", "hausgeld_monat", d.hausgeld_monat, "EUR")}
+        ${inputField("Strom+Heizung / Monat", "strom_heizung_monat", d.strom_heizung_monat, "EUR")}
+      </div>
+
+      <div class="hr"></div>
+      <div class="grid grid--2">
+        ${inputField("Verkauf Makler (fix)", "verkauf_makler_fix", d.verkauf_makler_fix, "EUR")}
+        ${inputField("Co-Investor Anteil", "coinvestor_pct", d.coinvestor_pct*100, "% vom VK")}
+        ${inputField("Homestaging (fix)", "homestaging_fix", d.homestaging_fix, "EUR")}
+      </div>
+    `),
+
+    card("Read-only Auszüge (berechnet)", `
+      ${readonlyRow("VK gering", deEUR(c.VK_g))}
+      ${readonlyRow("VK hoch", deEUR(c.VK_h))}
+      ${readonlyRow("INV (Gesamtinvest)", deEUR(c.INV))}
       <div class="hr"></div>
       <div style="display:flex;gap:10px;flex-wrap:wrap">
         <button class="btn" id="btnDup">Duplizieren</button>
         <button class="btn btn--danger" id="btnDel">Löschen</button>
       </div>
-      <div class="hr"></div>
+    `),
+
+    card("Deal-Liste", `
       <div class="grid">
         ${deals.map(x=>`
           <button class="btn" data-switch="${x.id}" style="text-align:left">
@@ -363,80 +440,25 @@ function renderDealTab(){
       </div>
     `),
 
-    card("Objekt & Markt", `
-      <div class="grid grid--2">
-        ${field("Kaufpreis", "kaufpreis", d.kaufpreis, "EUR")}
-        ${field("Wohnfläche", "wohnflaeche", d.wohnflaeche, "m²")}
-        ${field('Marktpreis "gering"', "marktpreis_g", d.marktpreis_g, "€/m²")}
-        ${field('Marktpreis "hoch"', "marktpreis_h", d.marktpreis_h, "€/m²")}
-      </div>
-      <div class="hr"></div>
-      <div class="row"><div class="l">VK gering</div><div class="r">${deEUR(c.VK_g)}</div></div>
-      <div class="row"><div class="l">VK hoch</div><div class="r">${deEUR(c.VK_h)}</div></div>
-    `),
-
-    card("Ankauf-Nebenkosten (Eingabe als % oder Dezimal)", `
-      <div class="grid grid--2">
-        ${field("Notar + Grundbuch", "notar_pct", d.notar_pct*100, "%")}
-        ${field("Makler Ankauf", "makler_ankauf_pct", d.makler_ankauf_pct*100, "%")}
-        ${field("GrESt", "grest_pct", d.grest_pct*100, "%")}
-      </div>
-      <div class="hr"></div>
-      <div class="row"><div class="l">Ankauf gesamt</div><div class="r">${deEUR(c.AnkaufGesamt)}</div></div>
-    `),
-
-    card("Renovierung", `
-      <div class="grid grid--2">
-        ${field("Entrümpelung", "entruempelung", d.entruempelung, "EUR")}
-        ${field("Renovierung", "renovierung", d.renovierung, "EUR")}
-        ${field("Sicherheitspuffer", "puffer_pct", d.puffer_pct*100, "%")}
-        ${field("Küche", "kueche", d.kueche, "EUR")}
-        ${field("Sonstiges", "sonstiges", d.sonstiges, "EUR")}
-      </div>
-      <div class="hr"></div>
-      <div class="row"><div class="l">Reno gesamt</div><div class="r">${deEUR(c.RenoGesamt)}</div></div>
-    `),
-
-    card("Finanzierung", `
-      <div class="grid grid--2">
-        ${field("Projektdauer", "projektdauer_monate", d.projektdauer_monate, "Monate")}
-        ${field("Finanzierungsquote", "finanzierungsquote", d.finanzierungsquote*100, "%")}
-        ${field("Zins p.a.", "zins_pa", d.zins_pa*100, "%")}
-        ${field("Bearbeitungsgebühr", "bearb_pct", d.bearb_pct*100, "%")}
-        ${field("Provision/Sonst", "fin_sonst_pct", d.fin_sonst_pct*100, "%")}
-      </div>
-      <div class="hr"></div>
-      <div class="row"><div class="l">Finanzierung gesamt</div><div class="r">${deEUR(c.FinGesamt)}</div></div>
-    `),
-
-    card("Laufende Kosten & Verkauf", `
-      <div class="grid grid--2">
-        ${field("Hausgeld / Monat", "hausgeld_monat", d.hausgeld_monat, "EUR")}
-        ${field("Strom+Heizung / Monat", "strom_heizung_monat", d.strom_heizung_monat, "EUR")}
-        ${field("Verkauf Makler (fix)", "verkauf_makler_fix", d.verkauf_makler_fix, "EUR")}
-        ${field("Co-Investor Anteil", "coinvestor_pct", d.coinvestor_pct*100, "% vom VK")}
-        ${field("Homestaging (fix)", "homestaging_fix", d.homestaging_fix, "EUR")}
-      </div>
-      <div class="hr"></div>
-      <div class="row"><div class="l">INV (Gesamtinvest)</div><div class="r">${deEUR(c.INV)}</div></div>
-    `),
-
     card("Ziel / Hinweis", `
       <div style="color:var(--muted);font-weight:700;line-height:1.45">
-        Ziel (aus deinem Template): <b>mind. 20% Marge</b> und <b>ca. 50.000 € Gewinn</b> als Orientierungswert.
+        Ziel: <b>mind. 20% Marge</b> und <b>ca. 50.000 € Gewinn</b> als Orientierungswert.
       </div>
-    `),
+    `)
   ].join("");
 
-  // Events
+  // Bind input events
   el.querySelectorAll("input[data-key]").forEach(inp=>{
     inp.addEventListener("input", (e)=> setField(e.target.dataset.key, e.target.value));
   });
   el.querySelectorAll("input[data-tkey]").forEach(inp=>{
-    inp.addEventListener("input", (e)=> setTextField(e.target.dataset.tkey, e.target.value));
+    inp.addEventListener("input", (e)=> setTextFieldValue(e.target.dataset.tkey, e.target.value));
   });
   el.querySelectorAll("button[data-switch]").forEach(btn=>{
-    btn.addEventListener("click", ()=>{ setActiveId(btn.dataset.switch); renderAll(); });
+    btn.addEventListener("click", ()=>{
+      setActiveId(btn.dataset.switch);
+      renderAll(false);
+    });
   });
 
   $("#btnDup").onclick = ()=> duplicateDeal(d.id);
@@ -451,7 +473,7 @@ function renderResultsTab(){
   const c = compute(d);
 
   $("#results").innerHTML = [
-    card("KPI Übersicht", `
+    card("Ergebnisse (Live)", `
       <div style="display:flex;align-items:center;justify-content:space-between;gap:10px;margin-bottom:10px">
         <div style="font-weight:950">${d.name}</div>
         ${ampBadge(c.Marge_g)}
@@ -466,10 +488,10 @@ function renderResultsTab(){
         <div class="kpi"><div class="kpi__label">Marge hoch</div><div class="kpi__value">${dePct(c.Marge_h)}</div></div>
       </div>
       <div class="hr"></div>
-      <div class="row"><div class="l">Ankauf gesamt</div><div class="r">${deEUR(c.AnkaufGesamt)}</div></div>
-      <div class="row"><div class="l">Reno gesamt</div><div class="r">${deEUR(c.RenoGesamt)}</div></div>
-      <div class="row"><div class="l">Finanzierung gesamt</div><div class="r">${deEUR(c.FinGesamt)}</div></div>
-      <div class="row"><div class="l">Laufende Kosten</div><div class="r">${deEUR(c.LaufendeKosten)}</div></div>
+      ${readonlyRow("Ankauf gesamt", deEUR(c.AnkaufGesamt))}
+      ${readonlyRow("Reno gesamt", deEUR(c.RenoGesamt))}
+      ${readonlyRow("Finanzierung gesamt", deEUR(c.FinGesamt))}
+      ${readonlyRow("Laufende Kosten", deEUR(c.LaufendeKosten))}
     `)
   ].join("");
 }
@@ -488,24 +510,19 @@ function renderNegotiationTab(){
           ${best ? `<span class="badge badge--ok">Beste Marge</span>` : ``}
         </div>
         <div class="hr"></div>
-        <div class="row"><div class="l">Kaufpreis nach Rabatt</div><div class="r">${deEUR(x.Kaufpreis_r)}</div></div>
-        <div class="row"><div class="l">INVEST (Excel-Verhandlung)</div><div class="r">${deEUR(x.INVEST_r)}</div></div>
+        ${readonlyRow("Kaufpreis nach Rabatt", deEUR(x.Kaufpreis_r))}
+        ${readonlyRow("INVEST (Verhandlung)", deEUR(x.INVEST_r))}
         <div class="hr"></div>
-        <div class="row"><div class="l">Gewinn gering</div><div class="r">${deEUR(x.Gewinn_g_r)}</div></div>
-        <div class="row"><div class="l">Marge gering</div><div class="r">${dePct(x.Marge_g_r)}</div></div>
-        <div class="row"><div class="l">Gewinn hoch</div><div class="r">${deEUR(x.Gewinn_h_r)}</div></div>
-        <div class="row"><div class="l">Marge hoch</div><div class="r">${dePct(x.Marge_h_r)}</div></div>
-        <div style="color:var(--muted);font-size:12px;margin-top:8px">
-          Hinweis: Gewinn-Formeln entsprechen der Excel-Verhandlungstabelle (inkl. Sonderlogik).
-        </div>
+        ${readonlyRow("Gewinn gering", deEUR(x.Gewinn_g_r))}
+        ${readonlyRow("Marge gering", dePct(x.Marge_g_r))}
+        ${readonlyRow("Gewinn hoch", deEUR(x.Gewinn_h_r))}
+        ${readonlyRow("Marge hoch", dePct(x.Marge_h_r))}
       </div>
     `;
   }).join("");
 
   $("#negotiation").innerHTML = [
-    card("Verhandlungstabelle (10%–45%)", `
-      <div class="table">${cards}</div>
-    `)
+    card("Verhandlungstabelle (10%–45%)", `<div class="table">${cards}</div>`)
   ].join("");
 }
 
@@ -515,13 +532,13 @@ function renderRentTab(){
   const c = compute(d);
 
   $("#rent").innerHTML = [
-    card("Eingaben Vermietung", `
+    card("Vermietung – Eingaben (hellblau)", `
       <div class="grid grid--2">
-        ${field("Pot. Miete", "pot_miete_qm", d.pot_miete_qm, "€/m²")}
-        ${field("Käufer Zins+Tilg p.a.", "kaeufer_zins_tilg_pa", d.kaeufer_zins_tilg_pa*100, "%")}
+        ${inputField("Pot. Miete", "pot_miete_qm", d.pot_miete_qm, "€/m²")}
+        ${inputField("Käufer Zins+Tilg p.a.", "kaeufer_zins_tilg_pa", d.kaeufer_zins_tilg_pa*100, "%")}
       </div>
     `),
-    card("Käuferperspektive", `
+    card("Vermietung – Auswertungen", `
       <div class="kpis">
         <div class="kpi"><div class="kpi__label">Jahresmiete</div><div class="kpi__value">${deEUR(c.Jahresmiete)}</div></div>
         <div class="kpi"><div class="kpi__label">Brutto-Rendite (VK gering *1,10)</div><div class="kpi__value">${dePct(c.BruttoRendite_g)}</div></div>
@@ -538,7 +555,6 @@ function renderRentTab(){
 }
 
 function renderScenariosTab(){
-  const act = activeDeal();
   const compIds = getCompareIds();
 
   const list = deals.map(d=>{
@@ -557,12 +573,13 @@ function renderScenariosTab(){
           </label>
         </div>
         <div class="hr"></div>
-        <div class="row"><div class="l">INV</div><div class="r">${deEUR(c.INV)}</div></div>
-        <div class="row"><div class="l">Gewinn gering</div><div class="r">${deEUR(c.Gewinn_g)}</div></div>
-        <div class="row"><div class="l">Marge gering</div><div class="r">${dePct(c.Marge_g)} ${ampBadge(c.Marge_g)}</div></div>
+        ${readonlyRow("INV", deEUR(c.INV))}
+        ${readonlyRow("Gewinn gering", deEUR(c.Gewinn_g))}
+        ${readonlyRow("Marge gering", `${dePct(c.Marge_g)} ${ampBadge(c.Marge_g)}`)}
         <div style="display:flex;gap:10px;flex-wrap:wrap;margin-top:10px">
           <button class="btn" data-activate="${d.id}">Öffnen</button>
           <button class="btn" data-dup="${d.id}">Duplizieren</button>
+          <button class="btn btn--danger" data-del="${d.id}">Löschen</button>
         </div>
       </div>
     `;
@@ -578,9 +595,9 @@ function renderScenariosTab(){
         return `
           <div style="padding:10px 0;border-bottom:1px solid var(--line)">
             <div style="font-weight:950">${d.name}</div>
-            <div class="row"><div class="l">INV</div><div class="r">${deEUR(c.INV)}</div></div>
-            <div class="row"><div class="l">Gewinn g</div><div class="r">${deEUR(c.Gewinn_g)}</div></div>
-            <div class="row"><div class="l">Marge g</div><div class="r">${dePct(c.Marge_g)}</div></div>
+            ${readonlyRow("INV", deEUR(c.INV))}
+            ${readonlyRow("Gewinn g", deEUR(c.Gewinn_g))}
+            ${readonlyRow("Marge g", dePct(c.Marge_g))}
           </div>
         `;
       }).join("")}
@@ -593,8 +610,8 @@ function renderScenariosTab(){
     card("Aktionen", `
       <div style="display:flex;gap:10px;flex-wrap:wrap">
         <button class="btn btn--primary" id="btnCreate2">Neuer Deal</button>
-        <button class="btn" id="btnExport">Export JSON (anzeigen)</button>
-        <button class="btn" id="btnImport">Import JSON (einfügen)</button>
+        <button class="btn" id="btnExport">Export JSON</button>
+        <button class="btn" id="btnImport">Import JSON</button>
       </div>
       <div id="ioArea" style="display:none;margin-top:10px">
         <textarea id="ioText" style="width:100%;min-height:160px;padding:12px;border-radius:14px;border:1px solid var(--line);font-family:ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;"></textarea>
@@ -614,27 +631,22 @@ function renderScenariosTab(){
     $("#ioArea").style.display = "block";
     $("#ioText").value = exportJson;
   };
-
   $("#btnImport").onclick = ()=>{
     $("#ioArea").style.display = "block";
     $("#ioText").value = "";
     $("#ioText").placeholder = "Hier JSON einfügen und dann „Import anwenden“ klicken.";
   };
-
-  $("#btnCloseIO").onclick = ()=>{
-    $("#ioArea").style.display = "none";
-  };
+  $("#btnCloseIO").onclick = ()=>{ $("#ioArea").style.display = "none"; };
 
   $("#btnApplyImport").onclick = ()=>{
     try{
       const parsed = JSON.parse($("#ioText").value);
       if (!Array.isArray(parsed)) throw new Error("JSON muss ein Array sein.");
-      // Basic sanitize: ensure id
       parsed.forEach(x=>{ if (!x.id) x.id = uid(); });
       deals = parsed;
-      saveDeals(deals);
-      if (deals[0]) setActiveId(deals[0].id);
-      renderAll();
+      persist();
+      setActiveId(deals[0]?.id || defaultDeal().id);
+      renderAll(false);
       alert("Import erfolgreich.");
     }catch(e){
       alert("Import fehlgeschlagen: " + e.message);
@@ -642,25 +654,27 @@ function renderScenariosTab(){
   };
 
   $("#scenarios").querySelectorAll("button[data-activate]").forEach(b=>{
-    b.onclick = ()=>{ setActiveId(b.dataset.activate); renderAll(); };
+    b.onclick = ()=>{ setActiveId(b.dataset.activate); renderAll(false); };
   });
   $("#scenarios").querySelectorAll("button[data-dup]").forEach(b=>{
     b.onclick = ()=> duplicateDeal(b.dataset.dup);
   });
+  $("#scenarios").querySelectorAll("button[data-del]").forEach(b=>{
+    b.onclick = ()=> { if (confirm("Deal wirklich löschen?")) deleteDeal(b.dataset.del); };
+  });
+
   $("#scenarios").querySelectorAll("input[data-compare]").forEach(cb=>{
     cb.onchange = ()=>{
       const ids = new Set(getCompareIds());
       if (cb.checked) ids.add(cb.dataset.compare);
       else ids.delete(cb.dataset.compare);
       setCompareIds(Array.from(ids));
-      renderAll(false);
+      renderComputedOnly();
     };
   });
 }
 
-function renderAll(scrollTop=true){
-  // refresh deals from storage (safe)
-  deals = loadDeals();
+function renderAll(scrollTop=false){
   renderDealTab();
   renderResultsTab();
   renderNegotiationTab();
@@ -669,24 +683,32 @@ function renderAll(scrollTop=true){
   if (scrollTop) window.scrollTo({top:0,behavior:"smooth"});
 }
 
+function renderComputedOnly(){
+  renderResultsTab();
+  renderNegotiationTab();
+  renderRentTab();
+  renderScenariosTab();
+}
+
 // Tabs
 document.querySelectorAll(".tab").forEach(btn=>{
   btn.addEventListener("click", ()=>{
     document.querySelectorAll(".tab").forEach(b=>b.classList.remove("tab--active"));
     btn.classList.add("tab--active");
-
     const t = btn.dataset.tab;
     document.querySelectorAll(".panel").forEach(p=>p.classList.remove("panel--active"));
     document.getElementById(t).classList.add("panel--active");
   });
 });
 
-// Global Buttons
-$("#btnNewDeal").onclick = createDeal;
+// Global button
+const btnNew = $("#btnNewDeal");
+if (btnNew) btnNew.onclick = createDeal;
 
-renderAll();
+// Initial render
+renderAll(false);
 
-// PWA Service Worker
+// PWA SW
 if ("serviceWorker" in navigator) {
   window.addEventListener("load", () => {
     navigator.serviceWorker.register("./service-worker.js").catch(()=>{});
