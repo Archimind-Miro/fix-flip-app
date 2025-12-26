@@ -29,39 +29,46 @@ function uid(){ return Math.random().toString(16).slice(2) + Date.now().toString
 function defaultDeal(){
   return {
     id: uid(),
-    name: "Dortmund Kurl – 66m²",
-    city: "Dortmund-Kurl",
+    name: "Blanko Deal",
+    city: "",
     createdAt: new Date().toISOString(),
 
-    kaufpreis: 95000,
-    wohnflaeche: 66,
-    marktpreis_g: 2700,
-    marktpreis_h: 2800,
+    // Objekt & Markt (blanko)
+    kaufpreis: 0,
+    wohnflaeche: 0,
+    marktpreis_g: 0,
+    marktpreis_h: 0,
 
+    // Ankauf-NK (du kannst hier Default-Prozente lassen, wenn du willst)
     notar_pct: 0.015,
     makler_ankauf_pct: 0.036,
     grest_pct: 0.065,
 
-    entruempelung: 2000,
-    renovierung: 32000,
+    // Renovierung (blanko)
+    entruempelung: 0,
+    renovierung: 0,
     puffer_pct: 0.10,
-    kueche: 5000,
+    kueche: 0,
     sonstiges: 0,
 
+    // Finanzierung (du kannst Defaults lassen)
     projektdauer_monate: 8,
     finanzierungsquote: 1.0,
     zins_pa: 0.055,
     bearb_pct: 0.01,
     fin_sonst_pct: 0,
 
-    hausgeld_monat: 250,
-    strom_heizung_monat: 140,
+    // Laufende Kosten (blanko)
+    hausgeld_monat: 0,
+    strom_heizung_monat: 0,
 
+    // Verkauf (blanko)
     verkauf_makler_fix: 0,
     coinvestor_pct: 0,
     homestaging_fix: 0,
 
-    pot_miete_qm: 13,
+    // Vermietung (blanko)
+    pot_miete_qm: 0,
     kaeufer_zins_tilg_pa: 0.054,
   };
 }
