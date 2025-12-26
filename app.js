@@ -1,19 +1,24 @@
 /*
-Fix & Flip Rechner – app.js (komplett, zum Ersetzen)
-- Statische PWA ohne Build-Tools
-- Speicherung lokal im Browser (localStorage)
-- Fokus-stabil: Beim Tippen im Deal-Tab werden nur berechnete Tabs neu gerendert (kein Cursor-Springen)
-- Exporte:
-  - PDF (druckoptimierter Report via window.print())
-  - Excel-Export als CSV (Excel-kompatibel, Semikolon-Trennung für DE)
-- Theme-Änderungen: rückgängig (keine Schwarz/Gelb-Overrides). Inputs bleiben hellblau markiert.
+Fix & Flip Rechner – app.js (komplett)
+Fixes:
+1) Kein Fokus-Springen beim Tippen: Deal-Tab wird beim Input NICHT neu gerendert.
+2) Live-Berechnung: Beim Input werden nur berechnete Tabs neu gerendert + Deal-Snippet per DOM aktualisiert.
+3) Lesbarkeit: Keine dunklen Overrides, keine var(--text)-Abhängigkeit.
+4) Professionelles UI: Cards, KPIs, Badges, Export.
+
+Hinweis:
+- Inputs sind type="text" mit inputmode="decimal", damit Mobile/Browser den Cursor nicht verlieren.
+- Prozentfelder: Eingabe "1,5" => 1.5% => intern 0.015. Eingabe "0,015" bleibt 0.015.
 */
 
-const LS_KEY = "ff_deals_v2";
-const LS_ACTIVE = "ff_active_deal_v2";
-const LS_COMPARE = "ff_compare_v2";
+const LS_KEY = "ff_deals_v4";
+const LS_ACTIVE = "ff_active_deal_v4";
+const LS_COMPARE = "ff_compare_v4";
 
 const DISCOUNTS = [0.10,0.15,0.20,0.25,0.30,0.35,0.40,0.45];
+
+// ---------- Helpers ----------
+const $ = (sel) => document.querySelector(sel);
 
 function deEUR(n){
   if (!isFinite(n)) return "–";
@@ -30,7 +35,27 @@ function clamp0(x){
 function uid(){
   return Math.random().toString(16).slice(2) + Date.now().toString(16);
 }
+function safeFileName(s){
+  return String(s || "deal")
+    .toLowerCase()
+    .replace(/[^a-z0-9äöüß\-_ ]/gi, "")
+    .trim()
+    .replace(/\s+/g, "-")
+    .slice(0, 60) || "deal";
+}
+function downloadText(filename, content, mime="text/plain;charset=utf-8"){
+  const blob = new Blob([content], { type: mime });
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement("a");
+  a.href = url;
+  a.download = filename;
+  document.body.appendChild(a);
+  a.click();
+  a.remove();
+  URL.revokeObjectURL(url);
+}
 
+// ---------- Defaults ----------
 function defaultDeal(){
   return {
     id: uid(),
@@ -44,7 +69,7 @@ function defaultDeal(){
     marktpreis_g: 0,
     marktpreis_h: 0,
 
-    // Ankauf-NK (Standardannahmen – wie Excel üblich)
+    // Ankauf-NK
     notar_pct: 0.015,
     makler_ankauf_pct: 0.036,
     grest_pct: 0.065,
@@ -84,20 +109,15 @@ function loadDeals(){
   if (!raw) return [];
   try { return JSON.parse(raw) || []; } catch { return []; }
 }
-function saveDeals(deals){
-  localStorage.setItem(LS_KEY, JSON.stringify(deals));
-}
+function saveDeals(deals){ localStorage.setItem(LS_KEY, JSON.stringify(deals)); }
 function getActiveId(){ return localStorage.getItem(LS_ACTIVE); }
 function setActiveId(id){ localStorage.setItem(LS_ACTIVE, id); }
-
 function getCompareIds(){
   try { return JSON.parse(localStorage.getItem(LS_COMPARE) || "[]"); } catch { return []; }
 }
-function setCompareIds(ids){
-  localStorage.setItem(LS_COMPARE, JSON.stringify(ids.slice(0,3)));
-}
+function setCompareIds(ids){ localStorage.setItem(LS_COMPARE, JSON.stringify(ids.slice(0,3))); }
 
-// ---------- Compute (Excel-Logik, template-nah) ----------
+// ---------- Excel-Logik (wie bisher, template-nah) ----------
 function compute(deal){
   const kaufpreis = clamp0(deal.kaufpreis);
   const wf = Math.max(1e-9, clamp0(deal.wohnflaeche));
@@ -162,7 +182,7 @@ function compute(deal){
   const Gewinn_g = VK_g - INV - (coinvestor_pct * VK_g) - homestaging_fix - verkauf_makler_fix;
   const Gewinn_h = VK_h - INV - (coinvestor_pct * VK_h) - homestaging_fix - verkauf_makler_fix;
 
-  // Template-nahe Marge (wie in deiner Datei implementiert)
+  // Marge wie in deiner bisherigen Implementierung
   const baseDen = (INV + verkauf_makler_fix + coinvestor_pct + homestaging_fix);
   const Marge_g = baseDen > 0 ? (VK_g - baseDen) / baseDen : NaN;
   const Marge_h = baseDen > 0 ? (VK_h - baseDen) / baseDen : NaN;
@@ -174,24 +194,21 @@ function compute(deal){
   const KaeuferRate_g = (VK_g * kaeufer_zins_tilg_pa) / 12;
   const KaeuferRate_h = (VK_h * kaeufer_zins_tilg_pa) / 12;
 
-  // Verhandlungstabelle (Excel-Sonderlogik)
+  // Verhandlungstabelle
   const negotiation = DISCOUNTS.map(r => {
     const Kaufpreis_r = kaufpreis * (1 - r);
 
-    // INVEST_r: Finanzierung auf Kaufpreis_r (nicht Finanzbetrag)
     const INVEST_r =
       (Kaufpreis_r + ((grest_pct + makler_pct + notar_pct) * Kaufpreis_r))
       + ((fin_sonst_pct * Kaufpreis_r) + (bearb_pct * Kaufpreis_r) + ((zins_pa * Kaufpreis_r / 12) * monate))
       + RenoGesamt
       + (MonatlicheKosten * monate);
 
-    // Gewinn gering ohne Verkaufsmakler_fix (wie Excel-Verhandlung)
     const Gewinn_g_r = VK_g - INVEST_r - (coinvestor_pct * VK_g) - homestaging_fix;
 
     const den_r = (INVEST_r + verkauf_makler_fix + coinvestor_pct + homestaging_fix);
     const Marge_g_r = den_r > 0 ? (VK_g - den_r) / den_r : NaN;
 
-    // Gewinn hoch nutzt coinvestor_pct * VK_g (Excel-Eigenheit)
     const Gewinn_h_r = VK_h - INVEST_r - (coinvestor_pct * VK_g) - homestaging_fix;
     const Marge_h_r = den_r > 0 ? (VK_h - den_r) / den_r : NaN;
 
@@ -218,84 +235,43 @@ function compute(deal){
   };
 }
 
-// ---------- UI helpers ----------
-const $ = (sel) => document.querySelector(sel);
-
+// ---------- UI building blocks ----------
 function ampBadge(marge){
   if (!isFinite(marge)) return `<span class="badge">–</span>`;
   if (marge > 0.20) return `<span class="badge badge--ok">OK</span>`;
   if (marge >= 0.10) return `<span class="badge badge--warn">Grenze</span>`;
   return `<span class="badge badge--bad">No-Go</span>`;
 }
-
 function card(title, inner){
   return `<div class="card"><div class="card__title">${title}</div>${inner}</div>`;
 }
-
-// Eingabefelder optisch markieren (hellblau)
-function inputField(label, key, value, hint){
+function row(label, value){
+  return `<div class="row"><div class="l">${label}</div><div class="r">${value}</div></div>`;
+}
+function inputField(label, key, value, hint, opts={}){
+  const { isPct=false } = opts;
+  // WICHTIG: type="text" verhindert Cursor-Springen durch Browser-Number-Parsing/Reflow
+  // Wir rendern initial einen Anzeige-Wert, aber beim Tippen ändern wir input.value NICHT mehr.
+  const display = (isPct ? (Number(value)*100) : value);
   return `
     <div class="field">
       <label><span>${label}</span><small>${hint || ""}</small></label>
-      <input class="ff-input" type="number" inputmode="decimal" value="${value}" data-key="${key}" />
+      <input class="ff-input" type="text" inputmode="decimal" value="${display ?? ""}"
+             data-key="${key}" data-pct="${isPct ? "1" : "0"}" autocomplete="off" />
     </div>`;
 }
 function textField(label, key, value, hint){
   return `
     <div class="field">
       <label><span>${label}</span><small>${hint || ""}</small></label>
-      <input class="ff-input" type="text" value="${value || ""}" data-tkey="${key}" />
+      <input class="ff-input" type="text" value="${value || ""}" data-tkey="${key}" autocomplete="off" />
     </div>`;
 }
-function readonlyRow(label, value){
-  return `<div class="row"><div class="l">${label}</div><div class="r">${value}</div></div>`;
-}
 
-function ensureInputStyle(){
-  // minimaler Inline-Style-Injector (hellblau) – unabhängig von styles.css
-  if (document.getElementById("ff-input-style")) return;
-  const s = document.createElement("style");
-  s.id = "ff-input-style";
-  s.textContent = `
-    .ff-input{
-      background: rgba(59,130,246,.10);
-      border-color: rgba(59,130,246,.25) !important;
-      color: inherit;
-    }
-    .ff-input:focus{
-      outline: none;
-      box-shadow: 0 0 0 4px rgba(59,130,246,.15);
-    }
-  `;
-  document.head.appendChild(s);
-}
-
-// ---------- Export (PDF + Excel/CSV) ----------
-function safeFileName(s){
-  return String(s || "deal")
-    .toLowerCase()
-    .replace(/[^a-z0-9äöüß\-_ ]/gi, "")
-    .trim()
-    .replace(/\s+/g, "-")
-    .slice(0, 60) || "deal";
-}
-
-function downloadText(filename, content, mime="text/plain;charset=utf-8"){
-  const blob = new Blob([content], { type: mime });
-  const url = URL.createObjectURL(blob);
-  const a = document.createElement("a");
-  a.href = url;
-  a.download = filename;
-  document.body.appendChild(a);
-  a.click();
-  a.remove();
-  URL.revokeObjectURL(url);
-}
-
+// ---------- Export ----------
 function exportCsvForDeal(deal){
   const c = compute(deal);
 
-  // Flach als Key/Value + Verhandlungstabelle; Excel öffnet CSV direkt
   const rows = [
     ["Deal", deal.name],
     ["Ort", deal.city],
@@ -353,7 +329,6 @@ function exportCsvForDeal(deal){
     rows.push([x.r, x.INVEST_r, x.Gewinn_g_r, x.Marge_g_r, x.Gewinn_h_r, x.Marge_h_r]);
   });
 
-  // CSV mit Semikolon für deutsches Excel
   const csv = rows
     .map(r => r.map(v => `"${String(v ?? "").replace(/"/g,'""')}"`).join(";"))
     .join("\n");
@@ -364,7 +339,6 @@ function exportCsvForDeal(deal){
 function exportPdfForDeal(deal){
   const c = compute(deal);
 
-  // Druckoptimierter Report in neuem Fenster (Browser-„Als PDF speichern“)
   const html = `
   <html lang="de">
   <head>
@@ -451,7 +425,7 @@ function exportPdfForDeal(deal){
   w.document.close();
 }
 
-// ---------- App state ----------
+// ---------- App State ----------
 let deals = loadDeals();
 if (!deals || deals.length === 0) {
   const d = defaultDeal();
@@ -466,10 +440,7 @@ function activeDeal(){
   const id = getActiveId();
   return deals.find(d => d.id === id) || deals[0];
 }
-
-function persist(){
-  saveDeals(deals);
-}
+function persist(){ saveDeals(deals); }
 
 // Prozentfelder (Eingabe als % oder Dezimal)
 const pctFields = new Set([
@@ -478,86 +449,62 @@ const pctFields = new Set([
   "coinvestor_pct","kaeufer_zins_tilg_pa"
 ]);
 
-function setField(key, value){
+function parseNumericInput(raw){
+  // Erlaubt: "1.234,56" / "1234.56" / "1234" / ""
+  const s = String(raw ?? "").trim().replace(/\s/g,"");
+  if (!s) return 0;
+  // wenn beides vorkommt: entferne Tausenderpunkte, Komma -> Punkt
+  const normalized = s.includes(",") ? s.replace(/\./g,"").replace(",", ".") : s;
+  const n = Number(normalized);
+  return isFinite(n) ? Math.max(0, n) : 0;
+}
+
+function applyField(key, rawValue, isPct){
   const d = activeDeal();
   if (!d) return;
 
-  let num = clamp0(String(value).trim());
-  if (pctFields.has(key) && num > 1) num = num / 100;
+  let num = parseNumericInput(rawValue);
+
+  if (isPct || pctFields.has(key)) {
+    // Heuristik: 1.5 => 1.5% => 0.015; 0.015 bleibt 0.015
+    if (num > 1) num = num / 100;
+  }
 
   d[key] = num;
   persist();
-
-  // Fokus stabil: beim Tippen im Deal-Tab nur berechnete Tabs aktualisieren
-  const activeEl = document.activeElement;
-  const isTypingInDeal = activeEl && activeEl.closest && activeEl.closest("#deal");
-  if (isTypingInDeal) renderComputedOnly();
-  else renderAll(false);
 }
 
-function setTextFieldValue(key, value){
-  const d = activeDeal();
-  if (!d) return;
+// ---------- Rendering strategy (anti-focus-jump) ----------
+let dealTabMounted = false;
 
-  d[key] = String(value);
-  persist();
-
-  const activeEl = document.activeElement;
-  const isTypingInDeal = activeEl && activeEl.closest && activeEl.closest("#deal");
-  if (isTypingInDeal) renderComputedOnly();
-  else renderAll(false);
-}
-
-function createDeal(){
-  const d = defaultDeal();
-  deals.unshift(d);
-  persist();
-  setActiveId(d.id);
-  renderAll(false);
-}
-
-function duplicateDeal(id){
-  const src = deals.find(x => x.id === id);
-  if (!src) return;
-  const copy = JSON.parse(JSON.stringify(src));
-  copy.id = uid();
-  copy.createdAt = new Date().toISOString();
-  copy.name = `${src.name} (Kopie)`;
-  deals.unshift(copy);
-  persist();
-  setActiveId(copy.id);
-  renderAll(false);
-}
-
-function deleteDeal(id){
-  const idx = deals.findIndex(x => x.id === id);
-  if (idx < 0) return;
-  deals.splice(idx, 1);
-  if (!deals.length) {
-    const d = defaultDeal();
-    deals = [d];
-  }
-  persist();
-  setActiveId(deals[0].id);
-  renderAll(false);
-}
-
-// ---------- Render ----------
 function renderDealTab(){
-  ensureInputStyle();
   const d = activeDeal();
   if (!d) return;
+
+  // Nur einmal den Deal-Tab DOM aufbauen (Inputs bleiben stabil)
+  // Bei Deal-Wechsel rendern wir neu.
+  const el = $("#deal");
+  const currentId = el?.dataset?.dealId;
+
+  if (dealTabMounted && currentId === d.id) {
+    // Nur Read-only Snippet refreshen
+    updateDealSnippet();
+    return;
+  }
+
+  dealTabMounted = true;
+  el.dataset.dealId = d.id;
+
   const c = compute(d);
 
-  const el = $("#deal");
   el.innerHTML = [
     card("Eingaben (hellblau) – wie die Excel-Felder", `
       <div class="grid grid--2">
         ${textField("Deal-Name", "name", d.name)}
         ${textField("Stadt/Ort", "city", d.city)}
       </div>
-      <div class="hr"></div>
 
+      <div class="hr"></div>
       <div class="grid grid--2">
         ${inputField("Kaufpreis", "kaufpreis", d.kaufpreis, "EUR")}
         ${inputField("Wohnfläche", "wohnflaeche", d.wohnflaeche, "m²")}
@@ -567,16 +514,16 @@ function renderDealTab(){
 
       <div class="hr"></div>
       <div class="grid grid--2">
-        ${inputField("Notar+Grundbuch", "notar_pct", d.notar_pct*100, "%")}
-        ${inputField("Makler Ankauf", "makler_ankauf_pct", d.makler_ankauf_pct*100, "%")}
-        ${inputField("GrESt", "grest_pct", d.grest_pct*100, "%")}
+        ${inputField("Notar+Grundbuch", "notar_pct", d.notar_pct, "%", {isPct:true})}
+        ${inputField("Makler Ankauf", "makler_ankauf_pct", d.makler_ankauf_pct, "%", {isPct:true})}
+        ${inputField("GrESt", "grest_pct", d.grest_pct, "%", {isPct:true})}
       </div>
 
       <div class="hr"></div>
       <div class="grid grid--2">
         ${inputField("Entrümpelung", "entruempelung", d.entruempelung, "EUR")}
         ${inputField("Renovierung", "renovierung", d.renovierung, "EUR")}
-        ${inputField("Sicherheitspuffer", "puffer_pct", d.puffer_pct*100, "%")}
+        ${inputField("Sicherheitspuffer", "puffer_pct", d.puffer_pct, "%", {isPct:true})}
         ${inputField("Küche", "kueche", d.kueche, "EUR")}
         ${inputField("Sonstiges", "sonstiges", d.sonstiges, "EUR")}
       </div>
@@ -584,10 +531,10 @@ function renderDealTab(){
       <div class="hr"></div>
       <div class="grid grid--2">
         ${inputField("Projektdauer", "projektdauer_monate", d.projektdauer_monate, "Monate")}
-        ${inputField("Finanzierungsquote", "finanzierungsquote", d.finanzierungsquote*100, "%")}
-        ${inputField("Zins p.a.", "zins_pa", d.zins_pa*100, "%")}
-        ${inputField("Bearbeitungsgebühr", "bearb_pct", d.bearb_pct*100, "%")}
-        ${inputField("Provision/Sonst", "fin_sonst_pct", d.fin_sonst_pct*100, "%")}
+        ${inputField("Finanzierungsquote", "finanzierungsquote", d.finanzierungsquote, "%", {isPct:true})}
+        ${inputField("Zins p.a.", "zins_pa", d.zins_pa, "%", {isPct:true})}
+        ${inputField("Bearbeitungsgebühr", "bearb_pct", d.bearb_pct, "%", {isPct:true})}
+        ${inputField("Provision/Sonst", "fin_sonst_pct", d.fin_sonst_pct, "%", {isPct:true})}
       </div>
 
       <div class="hr"></div>
@@ -599,17 +546,33 @@ function renderDealTab(){
       <div class="hr"></div>
       <div class="grid grid--2">
         ${inputField("Verkauf Makler (fix)", "verkauf_makler_fix", d.verkauf_makler_fix, "EUR")}
-        ${inputField("Co-Investor Anteil", "coinvestor_pct", d.coinvestor_pct*100, "% vom VK")}
+        ${inputField("Co-Investor Anteil", "coinvestor_pct", d.coinvestor_pct, "% vom VK", {isPct:true})}
         ${inputField("Homestaging (fix)", "homestaging_fix", d.homestaging_fix, "EUR")}
       </div>
     `),
 
     card("Read-only Auszüge (berechnet)", `
-      ${readonlyRow("VK gering", deEUR(c.VK_g))}
-      ${readonlyRow("VK hoch", deEUR(c.VK_h))}
-      ${readonlyRow("INV (Gesamtinvest)", deEUR(c.INV))}
+      <div class="miniGrid">
+        <div class="mini">
+          <div class="mini__label">VK gering</div>
+          <div class="mini__value" id="deal_vk_g">${deEUR(c.VK_g)}</div>
+        </div>
+        <div class="mini">
+          <div class="mini__label">VK hoch</div>
+          <div class="mini__value" id="deal_vk_h">${deEUR(c.VK_h)}</div>
+        </div>
+        <div class="mini">
+          <div class="mini__label">INV</div>
+          <div class="mini__value" id="deal_inv">${deEUR(c.INV)}</div>
+        </div>
+        <div class="mini">
+          <div class="mini__label">Marge (g)</div>
+          <div class="mini__value" id="deal_marge_g">${dePct(c.Marge_g)}</div>
+        </div>
+      </div>
+
       <div class="hr"></div>
-      <div style="display:flex;gap:10px;flex-wrap:wrap">
+      <div class="btnRow">
         <button class="btn" id="btnDup">Duplizieren</button>
         <button class="btn btn--danger" id="btnDel">Löschen</button>
       </div>
@@ -618,39 +581,88 @@ function renderDealTab(){
     card("Deal-Liste", `
       <div class="grid">
         ${deals.map(x=>`
-          <button class="btn" data-switch="${x.id}" style="text-align:left">
-            <div style="font-weight:950">${x.name}</div>
-            <div style="color:var(--muted);font-size:12px">${x.city || ""}</div>
+          <button class="btn btn--ghost" data-switch="${x.id}" style="text-align:left">
+            <div class="btnTitle">${x.name}</div>
+            <div class="btnSub">${x.city || ""}</div>
           </button>
         `).join("")}
       </div>
     `),
 
     card("Ziel / Hinweis", `
-      <div style="color:var(--muted);font-weight:700;line-height:1.45">
+      <div class="hint">
         Ziel: <b>mind. 20% Marge</b> und <b>ca. 50.000 € Gewinn</b> als Orientierungswert.
       </div>
     `)
   ].join("");
 
-  // Bind input events
-  el.querySelectorAll("input[data-key]").forEach(inp=>{
-    inp.addEventListener("input", (e)=> setField(e.target.dataset.key, e.target.value));
-  });
-  el.querySelectorAll("input[data-tkey]").forEach(inp=>{
-    inp.addEventListener("input", (e)=> setTextFieldValue(e.target.dataset.tkey, e.target.value));
-  });
+  // Delegate input handling (nur ein Listener, kein Re-Render)
+  el.addEventListener("input", onDealTabInput);
+  el.addEventListener("change", onDealTabInput);
+
+  // Deal switching
   el.querySelectorAll("button[data-switch]").forEach(btn=>{
     btn.addEventListener("click", ()=>{
       setActiveId(btn.dataset.switch);
+      // Deal-Tab muss neu aufgebaut werden (andere Values)
+      dealTabMounted = false;
       renderAll(false);
     });
   });
 
   $("#btnDup").onclick = ()=> duplicateDeal(d.id);
-  $("#btnDel").onclick = ()=> {
-    if (confirm("Deal wirklich löschen?")) deleteDeal(d.id);
-  };
+  $("#btnDel").onclick = ()=> { if (confirm("Deal wirklich löschen?")) deleteDeal(d.id); };
+
+  // Einmal initiale Snippet-Refresh
+  updateDealSnippet();
+}
+
+function onDealTabInput(e){
+  const t = e.target;
+  if (!t) return;
+
+  // Textfelder
+  if (t.matches("input[data-tkey]")) {
+    const key = t.dataset.tkey;
+    const d = activeDeal();
+    if (!d) return;
+    d[key] = String(t.value ?? "");
+    persist();
+
+    // keine Deal-Neurender: nur computed Tabs
+    renderComputedOnly();
+    // Snippet (VK/INV) hängt ggf. am Dealname nicht, aber stört nicht
+    updateDealSnippet();
+    return;
+  }
+
+  // Numeric Felder
+  if (t.matches("input[data-key]")) {
+    const key = t.dataset.key;
+    const isPct = t.dataset.pct === "1";
+
+    applyField(key, t.value, isPct);
+
+    // KEIN renderDealTab() hier -> kein Fokusverlust!
+    renderComputedOnly();
+    updateDealSnippet();
+  }
+}
+
+function updateDealSnippet(){
+  const d = activeDeal();
+  if (!d) return;
+  const c = compute(d);
+
+  const vkG = $("#deal_vk_g");
+  const vkH = $("#deal_vk_h");
+  const inv = $("#deal_inv");
+  const mg  = $("#deal_marge_g");
+
+  if (vkG) vkG.textContent = deEUR(c.VK_g);
+  if (vkH) vkH.textContent = deEUR(c.VK_h);
+  if (inv) inv.textContent = deEUR(c.INV);
+  if (mg)  mg.textContent  = dePct(c.Marge_g);
 }
 
 function renderResultsTab(){
@@ -660,10 +672,14 @@ function renderResultsTab(){
 
   $("#results").innerHTML = [
     card("Ergebnisse (Live)", `
-      <div style="display:flex;align-items:center;justify-content:space-between;gap:10px;margin-bottom:10px">
-        <div style="font-weight:950">${d.name}</div>
-        ${ampBadge(c.Marge_g)}
+      <div class="headerLine">
+        <div>
+          <div class="titleStrong">${d.name}</div>
+          <div class="subtle">${d.city || ""}</div>
+        </div>
+        <div>${ampBadge(c.Marge_g)}</div>
       </div>
+
       <div class="kpis">
         <div class="kpi"><div class="kpi__label">INV</div><div class="kpi__value">${deEUR(c.INV)}</div></div>
         <div class="kpi"><div class="kpi__label">VK gering</div><div class="kpi__value">${deEUR(c.VK_g)}</div></div>
@@ -673,11 +689,12 @@ function renderResultsTab(){
         <div class="kpi"><div class="kpi__label">Gewinn hoch</div><div class="kpi__value">${deEUR(c.Gewinn_h)}</div></div>
         <div class="kpi"><div class="kpi__label">Marge hoch</div><div class="kpi__value">${dePct(c.Marge_h)}</div></div>
       </div>
+
       <div class="hr"></div>
-      ${readonlyRow("Ankauf gesamt", deEUR(c.AnkaufGesamt))}
-      ${readonlyRow("Reno gesamt", deEUR(c.RenoGesamt))}
-      ${readonlyRow("Finanzierung gesamt", deEUR(c.FinGesamt))}
-      ${readonlyRow("Laufende Kosten", deEUR(c.LaufendeKosten))}
+      ${row("Ankauf gesamt", deEUR(c.AnkaufGesamt))}
+      ${row("Reno gesamt", deEUR(c.RenoGesamt))}
+      ${row("Finanzierung gesamt", deEUR(c.FinGesamt))}
+      ${row("Laufende Kosten", deEUR(c.LaufendeKosten))}
     `)
   ].join("");
 }
@@ -691,18 +708,18 @@ function renderNegotiationTab(){
     const best = (i === c.bestIdx);
     return `
       <div class="tableCard">
-        <div style="display:flex;align-items:center;justify-content:space-between;gap:10px">
-          <div style="font-weight:950">Rabatt ${dePct(x.r)}</div>
+        <div class="headerLine">
+          <div class="titleStrong">Rabatt ${dePct(x.r)}</div>
           ${best ? `<span class="badge badge--ok">Beste Marge</span>` : ``}
         </div>
         <div class="hr"></div>
-        ${readonlyRow("Kaufpreis nach Rabatt", deEUR(x.Kaufpreis_r))}
-        ${readonlyRow("INVEST (Verhandlung)", deEUR(x.INVEST_r))}
+        ${row("Kaufpreis nach Rabatt", deEUR(x.Kaufpreis_r))}
+        ${row("INVEST (Verhandlung)", deEUR(x.INVEST_r))}
         <div class="hr"></div>
-        ${readonlyRow("Gewinn gering", deEUR(x.Gewinn_g_r))}
-        ${readonlyRow("Marge gering", dePct(x.Marge_g_r))}
-        ${readonlyRow("Gewinn hoch", deEUR(x.Gewinn_h_r))}
-        ${readonlyRow("Marge hoch", dePct(x.Marge_h_r))}
+        ${row("Gewinn gering", deEUR(x.Gewinn_g_r))}
+        ${row("Marge gering", dePct(x.Marge_g_r))}
+        ${row("Gewinn hoch", deEUR(x.Gewinn_h_r))}
+        ${row("Marge hoch", dePct(x.Marge_h_r))}
       </div>
     `;
   }).join("");
@@ -718,13 +735,14 @@ function renderRentTab(){
   const c = compute(d);
 
   $("#rent").innerHTML = [
-    card("Vermietung – Eingaben (hellblau)", `
+    card("Vermietung – Eingaben", `
       <div class="grid grid--2">
         ${inputField("Pot. Miete", "pot_miete_qm", d.pot_miete_qm, "€/m²")}
-        ${inputField("Käufer Zins+Tilg p.a.", "kaeufer_zins_tilg_pa", d.kaeufer_zins_tilg_pa*100, "%")}
+        ${inputField("Käufer Zins+Tilg p.a.", "kaeufer_zins_tilg_pa", d.kaeufer_zins_tilg_pa, "%", {isPct:true})}
       </div>
+      <div class="subhint">Hinweis: Eingaben wirken live auf die Käuferperspektive.</div>
     `),
-    card("Vermietung – Auswertungen", `
+    card("Vermietung – Käuferperspektive", `
       <div class="kpis">
         <div class="kpi"><div class="kpi__label">Jahresmiete</div><div class="kpi__value">${deEUR(c.Jahresmiete)}</div></div>
         <div class="kpi"><div class="kpi__label">Brutto-Rendite (VK gering *1,10)</div><div class="kpi__value">${dePct(c.BruttoRendite_g)}</div></div>
@@ -735,8 +753,15 @@ function renderRentTab(){
     `)
   ].join("");
 
+  // Rent-Inputs -> gleiche Logik wie DealTab, aber hier ist Re-Render ok (anderer Tab)
   $("#rent").querySelectorAll("input[data-key]").forEach(inp=>{
-    inp.addEventListener("input", (e)=> setField(e.target.dataset.key, e.target.value));
+    inp.addEventListener("input",(e)=>{
+      const key = e.target.dataset.key;
+      const isPct = e.target.dataset.pct === "1";
+      applyField(key, e.target.value, isPct);
+      renderComputedOnly();
+      updateDealSnippet();
+    });
   });
 }
 
@@ -748,21 +773,21 @@ function renderScenariosTab(){
     const checked = compIds.includes(d.id);
     return `
       <div class="tableCard">
-        <div style="display:flex;align-items:center;justify-content:space-between;gap:10px">
+        <div class="headerLine">
           <div>
-            <div style="font-weight:950">${d.name}</div>
-            <div style="color:var(--muted);font-size:12px">${d.city || ""}</div>
+            <div class="titleStrong">${d.name}</div>
+            <div class="subtle">${d.city || ""}</div>
           </div>
-          <label class="badge">
+          <label class="chip">
             <input type="checkbox" data-compare="${d.id}" ${checked ? "checked" : ""}/>
             <span>Vergleich</span>
           </label>
         </div>
         <div class="hr"></div>
-        ${readonlyRow("INV", deEUR(c.INV))}
-        ${readonlyRow("Gewinn gering", deEUR(c.Gewinn_g))}
-        ${readonlyRow("Marge gering", `${dePct(c.Marge_g)} ${ampBadge(c.Marge_g)}`)}
-        <div style="display:flex;gap:10px;flex-wrap:wrap;margin-top:10px">
+        ${row("INV", deEUR(c.INV))}
+        ${row("Gewinn gering", deEUR(c.Gewinn_g))}
+        ${row("Marge gering", `${dePct(c.Marge_g)} ${ampBadge(c.Marge_g)}`)}
+        <div class="btnRow">
           <button class="btn" data-activate="${d.id}">Öffnen</button>
           <button class="btn" data-dup="${d.id}">Duplizieren</button>
           <button class="btn btn--danger" data-del="${d.id}">Löschen</button>
@@ -774,36 +799,36 @@ function renderScenariosTab(){
   const compareDeals = deals.filter(d=>compIds.includes(d.id)).slice(0,3);
   const compareHtml = compareDeals.length ? `
     <div class="tableCard">
-      <div style="font-weight:950;margin-bottom:8px">Vergleich (bis zu 3)</div>
+      <div class="titleStrong" style="margin-bottom:8px">Vergleich (bis zu 3)</div>
       <div class="hr"></div>
       ${compareDeals.map(d=>{
         const c = compute(d);
         return `
           <div style="padding:10px 0;border-bottom:1px solid var(--line)">
-            <div style="font-weight:950">${d.name}</div>
-            ${readonlyRow("INV", deEUR(c.INV))}
-            ${readonlyRow("Gewinn g", deEUR(c.Gewinn_g))}
-            ${readonlyRow("Marge g", dePct(c.Marge_g))}
+            <div class="titleStrong">${d.name}</div>
+            ${row("INV", deEUR(c.INV))}
+            ${row("Gewinn g", deEUR(c.Gewinn_g))}
+            ${row("Marge g", dePct(c.Marge_g))}
           </div>
         `;
       }).join("")}
     </div>
-  ` : `<div class="tableCard" style="color:var(--muted);font-weight:700">Wähle 1–3 Deals zum Vergleich (Checkbox).</div>`;
+  ` : `<div class="tableCard subtle" style="font-weight:700">Wähle 1–3 Deals zum Vergleich (Checkbox).</div>`;
 
   const exportJson = JSON.stringify(deals, null, 2);
 
   $("#scenarios").innerHTML = [
     card("Aktionen", `
-      <div style="display:flex;gap:10px;flex-wrap:wrap">
+      <div class="btnRow">
         <button class="btn btn--primary" id="btnCreate2">Neuer Deal</button>
         <button class="btn" id="btnExportPdf">PDF Export</button>
         <button class="btn" id="btnExportCsv">Excel Export (CSV)</button>
-        <button class="btn" id="btnExport">Export JSON (anzeigen)</button>
-        <button class="btn" id="btnImport">Import JSON (einfügen)</button>
+        <button class="btn" id="btnExport">Export JSON</button>
+        <button class="btn" id="btnImport">Import JSON</button>
       </div>
       <div id="ioArea" style="display:none;margin-top:10px">
-        <textarea id="ioText" style="width:100%;min-height:160px;padding:12px;border-radius:14px;border:1px solid var(--line);font-family:ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;"></textarea>
-        <div style="display:flex;gap:10px;flex-wrap:wrap;margin-top:10px">
+        <textarea id="ioText" class="io"></textarea>
+        <div class="btnRow" style="margin-top:10px">
           <button class="btn btn--primary" id="btnApplyImport">Import anwenden</button>
           <button class="btn" id="btnCloseIO">Schließen</button>
         </div>
@@ -814,12 +839,9 @@ function renderScenariosTab(){
   ].join("");
 
   $("#btnCreate2").onclick = createDeal;
-
-  // Exports
   $("#btnExportPdf").onclick = ()=> exportPdfForDeal(activeDeal());
   $("#btnExportCsv").onclick = ()=> exportCsvForDeal(activeDeal());
 
-  // JSON IO
   $("#btnExport").onclick = ()=>{
     $("#ioArea").style.display = "block";
     $("#ioText").value = exportJson;
@@ -839,6 +861,7 @@ function renderScenariosTab(){
       deals = parsed;
       persist();
       setActiveId(deals[0]?.id || defaultDeal().id);
+      dealTabMounted = false;
       renderAll(false);
       alert("Import erfolgreich.");
     }catch(e){
@@ -847,7 +870,11 @@ function renderScenariosTab(){
   };
 
   $("#scenarios").querySelectorAll("button[data-activate]").forEach(b=>{
-    b.onclick = ()=>{ setActiveId(b.dataset.activate); renderAll(false); };
+    b.onclick = ()=>{
+      setActiveId(b.dataset.activate);
+      dealTabMounted = false;
+      renderAll(false);
+    };
   });
   $("#scenarios").querySelectorAll("button[data-dup]").forEach(b=>{
     b.onclick = ()=> duplicateDeal(b.dataset.dup);
@@ -867,6 +894,43 @@ function renderScenariosTab(){
   });
 }
 
+// ---------- Actions ----------
+function createDeal(){
+  const d = defaultDeal();
+  deals.unshift(d);
+  persist();
+  setActiveId(d.id);
+  dealTabMounted = false;
+  renderAll(false);
+}
+function duplicateDeal(id){
+  const src = deals.find(x => x.id === id);
+  if (!src) return;
+  const copy = JSON.parse(JSON.stringify(src));
+  copy.id = uid();
+  copy.createdAt = new Date().toISOString();
+  copy.name = `${src.name} (Kopie)`;
+  deals.unshift(copy);
+  persist();
+  setActiveId(copy.id);
+  dealTabMounted = false;
+  renderAll(false);
+}
+function deleteDeal(id){
+  const idx = deals.findIndex(x => x.id === id);
+  if (idx < 0) return;
+  deals.splice(idx, 1);
+  if (!deals.length) {
+    const d = defaultDeal();
+    deals = [d];
+  }
+  persist();
+  setActiveId(deals[0].id);
+  dealTabMounted = false;
+  renderAll(false);
+}
+
+// ---------- Render orchestration ----------
 function renderAll(scrollTop=false){
   renderDealTab();
   renderResultsTab();
@@ -875,7 +939,6 @@ function renderAll(scrollTop=false){
   renderScenariosTab();
   if (scrollTop) window.scrollTo({top:0,behavior:"smooth"});
 }
-
 function renderComputedOnly(){
   renderResultsTab();
   renderNegotiationTab();
@@ -883,18 +946,19 @@ function renderComputedOnly(){
   renderScenariosTab();
 }
 
-// Tabs
+// ---------- Tabs ----------
 document.querySelectorAll(".tab").forEach(btn=>{
   btn.addEventListener("click", ()=>{
     document.querySelectorAll(".tab").forEach(b=>b.classList.remove("tab--active"));
     btn.classList.add("tab--active");
+
     const t = btn.dataset.tab;
     document.querySelectorAll(".panel").forEach(p=>p.classList.remove("panel--active"));
     document.getElementById(t).classList.add("panel--active");
   });
 });
 
-// Global button
+// Global button (falls vorhanden)
 const btnNew = $("#btnNewDeal");
 if (btnNew) btnNew.onclick = createDeal;
 
