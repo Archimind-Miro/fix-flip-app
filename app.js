@@ -1,16 +1,21 @@
 /*
-Fix & Flip Rechner – app.js (komplett)
+Fix & Flip Rechner – app.js (komplett, ersetzbar)
 - Statische PWA ohne Build-Tools
 - Speicherung lokal im Browser (localStorage)
-- Fokus-stabil: beim Tippen werden nur berechnete Tabs neu gerendert
+- Fokus-stabil: Beim Tippen im Deal-Tab werden nur berechnete Tabs neu gerendert (kein Cursor-Springen)
+- Exporte:
+  - PDF (druckoptimierter Report via window.print())
+  - Excel-Export als CSV (Excel-kompatibel, Semikolon-Trennung für DE)
+- Theme: Schwarz/Gelb (inkl. Input-Highlight)
 */
 
-const LS_KEY = "ff_deals_v2";
-const LS_ACTIVE = "ff_active_deal_v2";
-const LS_COMPARE = "ff_compare_v2";
+const LS_KEY = "ff_deals_v3";
+const LS_ACTIVE = "ff_active_deal_v3";
+const LS_COMPARE = "ff_compare_v3";
 
 const DISCOUNTS = [0.10,0.15,0.20,0.25,0.30,0.35,0.40,0.45];
 
+// ---------- Formatting / Helpers ----------
 function deEUR(n){
   if (!isFinite(n)) return "–";
   return new Intl.NumberFormat("de-DE",{style:"currency",currency:"EUR"}).format(n);
@@ -26,7 +31,28 @@ function clamp0(x){
 function uid(){
   return Math.random().toString(16).slice(2) + Date.now().toString(16);
 }
+function safeFileName(s){
+  return String(s || "deal")
+    .toLowerCase()
+    .replace(/[^a-z0-9äöüß\-_ ]/gi, "")
+    .trim()
+    .replace(/\s+/g, "-")
+    .slice(0, 60) || "deal";
+}
 
+function downloadText(filename, content, mime="text/plain;charset=utf-8"){
+  const blob = new Blob([content], { type: mime });
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement("a");
+  a.href = url;
+  a.download = filename;
+  document.body.appendChild(a);
+  a.click();
+  a.remove();
+  URL.revokeObjectURL(url);
+}
+
+// ---------- Default Deal ----------
 function defaultDeal(){
   return {
     id: uid(),
@@ -40,7 +66,7 @@ function defaultDeal(){
     marktpreis_g: 0,
     marktpreis_h: 0,
 
-    // Ankauf-NK (Standardannahmen – wie Excel üblich)
+    // Ankauf-NK (Standardannahmen)
     notar_pct: 0.015,
     makler_ankauf_pct: 0.036,
     grest_pct: 0.065,
@@ -214,6 +240,164 @@ function compute(deal){
   };
 }
 
+// ---------- Export (PDF + Excel/CSV) ----------
+function exportCsvForDeal(deal){
+  const c = compute(deal);
+
+  const rows = [
+    ["Deal", deal.name],
+    ["Ort", deal.city],
+    ["Zeitpunkt", new Date().toLocaleString("de-DE")],
+    ["", ""],
+
+    ["INPUT kaufpreis", deal.kaufpreis],
+    ["INPUT wohnflaeche", deal.wohnflaeche],
+    ["INPUT marktpreis_g", deal.marktpreis_g],
+    ["INPUT marktpreis_h", deal.marktpreis_h],
+
+    ["INPUT notar_pct", deal.notar_pct],
+    ["INPUT makler_ankauf_pct", deal.makler_ankauf_pct],
+    ["INPUT grest_pct", deal.grest_pct],
+
+    ["INPUT entruempelung", deal.entruempelung],
+    ["INPUT renovierung", deal.renovierung],
+    ["INPUT puffer_pct", deal.puffer_pct],
+    ["INPUT kueche", deal.kueche],
+    ["INPUT sonstiges", deal.sonstiges],
+
+    ["INPUT projektdauer_monate", deal.projektdauer_monate],
+    ["INPUT finanzierungsquote", deal.finanzierungsquote],
+    ["INPUT zins_pa", deal.zins_pa],
+    ["INPUT bearb_pct", deal.bearb_pct],
+    ["INPUT fin_sonst_pct", deal.fin_sonst_pct],
+
+    ["INPUT hausgeld_monat", deal.hausgeld_monat],
+    ["INPUT strom_heizung_monat", deal.strom_heizung_monat],
+
+    ["INPUT verkauf_makler_fix", deal.verkauf_makler_fix],
+    ["INPUT coinvestor_pct", deal.coinvestor_pct],
+    ["INPUT homestaging_fix", deal.homestaging_fix],
+
+    ["INPUT pot_miete_qm", deal.pot_miete_qm],
+    ["INPUT kaeufer_zins_tilg_pa", deal.kaeufer_zins_tilg_pa],
+
+    ["", ""],
+    ["OUTPUT VK_g", c.VK_g],
+    ["OUTPUT VK_h", c.VK_h],
+    ["OUTPUT INV", c.INV],
+    ["OUTPUT Gewinn_g", c.Gewinn_g],
+    ["OUTPUT Gewinn_h", c.Gewinn_h],
+    ["OUTPUT Marge_g", c.Marge_g],
+    ["OUTPUT Marge_h", c.Marge_h],
+    ["OUTPUT Jahresmiete", c.Jahresmiete],
+    ["OUTPUT BruttoRendite_g", c.BruttoRendite_g],
+    ["OUTPUT BruttoRendite_h", c.BruttoRendite_h],
+    ["OUTPUT KäuferRate_g", c.KaeuferRate_g],
+    ["OUTPUT KäuferRate_h", c.KaeuferRate_h],
+  ];
+
+  rows.push(["", ""], ["VERHANDLUNG", ""], ["Rabatt", "INVEST_r", "Gewinn_g_r", "Marge_g_r", "Gewinn_h_r", "Marge_h_r"]);
+  c.negotiation.forEach(x=>{
+    rows.push([x.r, x.INVEST_r, x.Gewinn_g_r, x.Marge_g_r, x.Gewinn_h_r, x.Marge_h_r]);
+  });
+
+  // deutsches Excel: Semikolon-Trenner
+  const csv = rows
+    .map(r => r.map(v => `"${String(v ?? "").replace(/"/g,'""')}"`).join(";"))
+    .join("\n");
+
+  downloadText(`${safeFileName(deal.name)}-fixflip-export.csv`, csv, "text/csv;charset=utf-8");
+}
+
+function exportPdfForDeal(deal){
+  const c = compute(deal);
+
+  const html = `
+  <html lang="de">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width,initial-scale=1" />
+    <title>${deal.name} – Fix&Flip Report</title>
+    <style>
+      body{font-family:system-ui,-apple-system,Segoe UI,Roboto,Arial,sans-serif;margin:24px;color:#111}
+      h1{margin:0 0 6px;font-size:20px}
+      .muted{color:#555;margin:0 0 18px}
+      .grid{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:10px}
+      .card{border:1px solid #ddd;border-radius:12px;padding:12px}
+      .row{display:flex;justify-content:space-between;gap:10px;padding:6px 0;border-bottom:1px solid #eee}
+      .row:last-child{border-bottom:none}
+      .l{color:#555;font-weight:600}
+      .r{font-weight:800}
+      table{width:100%;border-collapse:collapse;margin-top:8px}
+      th,td{border:1px solid #ddd;padding:8px;font-size:12px;text-align:right}
+      th:first-child,td:first-child{text-align:left}
+      @media print { button{display:none} }
+    </style>
+  </head>
+  <body>
+    <button onclick="window.print()">Als PDF drucken / speichern</button>
+    <h1>${deal.name}</h1>
+    <p class="muted">${deal.city || ""} • ${new Date().toLocaleString("de-DE")}</p>
+
+    <div class="grid">
+      <div class="card">
+        <h3>Ergebnisse</h3>
+        <div class="row"><div class="l">INV</div><div class="r">${deEUR(c.INV)}</div></div>
+        <div class="row"><div class="l">VK gering</div><div class="r">${deEUR(c.VK_g)}</div></div>
+        <div class="row"><div class="l">Gewinn gering</div><div class="r">${deEUR(c.Gewinn_g)}</div></div>
+        <div class="row"><div class="l">Marge gering</div><div class="r">${dePct(c.Marge_g)}</div></div>
+        <div class="row"><div class="l">VK hoch</div><div class="r">${deEUR(c.VK_h)}</div></div>
+        <div class="row"><div class="l">Gewinn hoch</div><div class="r">${deEUR(c.Gewinn_h)}</div></div>
+        <div class="row"><div class="l">Marge hoch</div><div class="r">${dePct(c.Marge_h)}</div></div>
+      </div>
+
+      <div class="card">
+        <h3>Inputs (Kurz)</h3>
+        <div class="row"><div class="l">Kaufpreis</div><div class="r">${deEUR(clamp0(deal.kaufpreis))}</div></div>
+        <div class="row"><div class="l">Wohnfläche</div><div class="r">${clamp0(deal.wohnflaeche)} m²</div></div>
+        <div class="row"><div class="l">Markt €/m² (g/h)</div><div class="r">${clamp0(deal.marktpreis_g)} / ${clamp0(deal.marktpreis_h)}</div></div>
+        <div class="row"><div class="l">Reno gesamt</div><div class="r">${deEUR(c.RenoGesamt)}</div></div>
+        <div class="row"><div class="l">Finanzierung gesamt</div><div class="r">${deEUR(c.FinGesamt)}</div></div>
+        <div class="row"><div class="l">Laufende Kosten</div><div class="r">${deEUR(c.LaufendeKosten)}</div></div>
+      </div>
+    </div>
+
+    <div class="card" style="margin-top:12px">
+      <h3>Verhandlung (10–45%)</h3>
+      <table>
+        <thead>
+          <tr>
+            <th>Rabatt</th><th>INVEST</th><th>Gewinn g</th><th>Marge g</th><th>Gewinn h</th><th>Marge h</th>
+          </tr>
+        </thead>
+        <tbody>
+          ${c.negotiation.map(x=>`
+            <tr>
+              <td>${dePct(x.r)}</td>
+              <td>${deEUR(x.INVEST_r)}</td>
+              <td>${deEUR(x.Gewinn_g_r)}</td>
+              <td>${dePct(x.Marge_g_r)}</td>
+              <td>${deEUR(x.Gewinn_h_r)}</td>
+              <td>${dePct(x.Marge_h_r)}</td>
+            </tr>
+          `).join("")}
+        </tbody>
+      </table>
+    </div>
+  </body>
+  </html>
+  `;
+
+  const w = window.open("", "_blank");
+  if (!w) {
+    alert("Popup-Blocker aktiv. Bitte Popups für diese Seite erlauben und erneut versuchen.");
+    return;
+  }
+  w.document.open();
+  w.document.write(html);
+  w.document.close();
+}
+
 // ---------- UI helpers ----------
 const $ = (sel) => document.querySelector(sel);
 
@@ -228,7 +412,7 @@ function card(title, inner){
   return `<div class="card"><div class="card__title">${title}</div>${inner}</div>`;
 }
 
-// Eingabefelder optisch markieren (hellblau)
+// Eingabefelder optisch markieren (Schwarz/Gelb)
 function inputField(label, key, value, hint){
   return `
     <div class="field">
@@ -248,18 +432,18 @@ function readonlyRow(label, value){
 }
 
 function ensureInputStyle(){
-  // falls styles.css noch nicht angepasst ist: minimaler Inline-Style-Injector
   if (document.getElementById("ff-input-style")) return;
   const s = document.createElement("style");
   s.id = "ff-input-style";
   s.textContent = `
     .ff-input{
-      background: rgba(59,130,246,.10);
-      border-color: rgba(59,130,246,.25) !important;
+      background: rgba(246,201,14,.14);
+      border-color: rgba(246,201,14,.35) !important;
+      color: var(--text);
     }
     .ff-input:focus{
       outline: none;
-      box-shadow: 0 0 0 4px rgba(59,130,246,.15);
+      box-shadow: 0 0 0 4px rgba(246,201,14,.18);
     }
   `;
   document.head.appendChild(s);
@@ -365,7 +549,7 @@ function renderDealTab(){
 
   const el = $("#deal");
   el.innerHTML = [
-    card("Eingaben (hellblau) – wie die Excel-Felder", `
+    card("Eingaben (gelb markiert) – wie die Excel-Felder", `
       <div class="grid grid--2">
         ${textField("Deal-Name", "name", d.name)}
         ${textField("Stadt/Ort", "city", d.city)}
@@ -532,7 +716,7 @@ function renderRentTab(){
   const c = compute(d);
 
   $("#rent").innerHTML = [
-    card("Vermietung – Eingaben (hellblau)", `
+    card("Vermietung – Eingaben (gelb markiert)", `
       <div class="grid grid--2">
         ${inputField("Pot. Miete", "pot_miete_qm", d.pot_miete_qm, "€/m²")}
         ${inputField("Käufer Zins+Tilg p.a.", "kaeufer_zins_tilg_pa", d.kaeufer_zins_tilg_pa*100, "%")}
@@ -610,6 +794,8 @@ function renderScenariosTab(){
     card("Aktionen", `
       <div style="display:flex;gap:10px;flex-wrap:wrap">
         <button class="btn btn--primary" id="btnCreate2">Neuer Deal</button>
+        <button class="btn" id="btnExportPdf">PDF Export</button>
+        <button class="btn" id="btnExportCsv">Excel Export (CSV)</button>
         <button class="btn" id="btnExport">Export JSON</button>
         <button class="btn" id="btnImport">Import JSON</button>
       </div>
@@ -626,6 +812,8 @@ function renderScenariosTab(){
   ].join("");
 
   $("#btnCreate2").onclick = createDeal;
+  $("#btnExportPdf").onclick = ()=> exportPdfForDeal(activeDeal());
+  $("#btnExportCsv").onclick = ()=> exportCsvForDeal(activeDeal());
 
   $("#btnExport").onclick = ()=>{
     $("#ioArea").style.display = "block";
@@ -695,6 +883,7 @@ document.querySelectorAll(".tab").forEach(btn=>{
   btn.addEventListener("click", ()=>{
     document.querySelectorAll(".tab").forEach(b=>b.classList.remove("tab--active"));
     btn.classList.add("tab--active");
+
     const t = btn.dataset.tab;
     document.querySelectorAll(".panel").forEach(p=>p.classList.remove("panel--active"));
     document.getElementById(t).classList.add("panel--active");
