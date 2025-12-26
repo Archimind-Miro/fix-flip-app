@@ -1,23 +1,27 @@
 :root{
-  --bg:#f5f7fb;
-  --card:#ffffff;
-  --text:#0f172a;
-  --muted:#64748b;
-  --line:rgba(15,23,42,.08);
-  --shadow:0 10px 30px rgba(2,6,23,.08);
+  --bg:#0b0b0d;
+  --card:#111114;
+  --text:#f5f5f5;
+  --muted:#b3b3b3;
+  --line:rgba(255,255,255,.10);
+  --shadow:0 10px 30px rgba(0,0,0,.45);
   --radius:18px;
-  --ok:#16a34a;
+
+  --ok:#22c55e;
   --warn:#f59e0b;
   --bad:#ef4444;
-  --primary:#111827;
-  --primary2:#2563eb;
+
+  --primary:#0b0b0d;     /* schwarz */
+  --primary2:#f6c90e;    /* gelb */
 }
 
 *{box-sizing:border-box}
 body{
   margin:0;
   font-family:system-ui,-apple-system,Segoe UI,Roboto,Arial,sans-serif;
-  background:linear-gradient(180deg,var(--bg),#eef2ff);
+  background: radial-gradient(1200px 600px at 20% 0%, rgba(246,201,14,.16), transparent 55%),
+            radial-gradient(900px 500px at 90% 10%, rgba(246,201,14,.10), transparent 60%),
+            linear-gradient(180deg, #0b0b0d, #070709);
   color:var(--text);
 }
 
@@ -162,9 +166,9 @@ body{
   cursor:pointer;
 }
 .btn--primary{
-  background:linear-gradient(180deg,var(--primary2),#1d4ed8);
-  color:white;
-  border-color:rgba(29,78,216,.35);
+  background:linear-gradient(180deg,var(--primary2),#d6ad00);
+  color:#0b0b0d;
+  border-color:rgba(246,201,14,.35);
 }
 .btn--danger{
   background:linear-gradient(180deg,#ef4444,#dc2626);
