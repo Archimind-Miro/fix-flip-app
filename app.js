@@ -1,21 +1,20 @@
 /*
-Fix & Flip Rechner – app.js (komplett, ersetzbar)
+Fix & Flip Rechner – app.js (komplett, zum Ersetzen)
 - Statische PWA ohne Build-Tools
 - Speicherung lokal im Browser (localStorage)
 - Fokus-stabil: Beim Tippen im Deal-Tab werden nur berechnete Tabs neu gerendert (kein Cursor-Springen)
 - Exporte:
   - PDF (druckoptimierter Report via window.print())
   - Excel-Export als CSV (Excel-kompatibel, Semikolon-Trennung für DE)
-- Theme: Schwarz/Gelb (inkl. Input-Highlight)
+- Theme-Änderungen: rückgängig (keine Schwarz/Gelb-Overrides). Inputs bleiben hellblau markiert.
 */
 
-const LS_KEY = "ff_deals_v3";
-const LS_ACTIVE = "ff_active_deal_v3";
-const LS_COMPARE = "ff_compare_v3";
+const LS_KEY = "ff_deals_v2";
+const LS_ACTIVE = "ff_active_deal_v2";
+const LS_COMPARE = "ff_compare_v2";
 
 const DISCOUNTS = [0.10,0.15,0.20,0.25,0.30,0.35,0.40,0.45];
 
-// ---------- Formatting / Helpers ----------
 function deEUR(n){
   if (!isFinite(n)) return "–";
   return new Intl.NumberFormat("de-DE",{style:"currency",currency:"EUR"}).format(n);
@@ -31,28 +30,7 @@ function clamp0(x){
 function uid(){
   return Math.random().toString(16).slice(2) + Date.now().toString(16);
 }
-function safeFileName(s){
-  return String(s || "deal")
-    .toLowerCase()
-    .replace(/[^a-z0-9äöüß\-_ ]/gi, "")
-    .trim()
-    .replace(/\s+/g, "-")
-    .slice(0, 60) || "deal";
-}
 
-function downloadText(filename, content, mime="text/plain;charset=utf-8"){
-  const blob = new Blob([content], { type: mime });
-  const url = URL.createObjectURL(blob);
-  const a = document.createElement("a");
-  a.href = url;
-  a.download = filename;
-  document.body.appendChild(a);
-  a.click();
-  a.remove();
-  URL.revokeObjectURL(url);
-}
-
-// ---------- Default Deal ----------
 function defaultDeal(){
   return {
     id: uid(),
@@ -66,7 +44,7 @@ function defaultDeal(){
     marktpreis_g: 0,
     marktpreis_h: 0,
 
-    // Ankauf-NK (Standardannahmen)
+    // Ankauf-NK (Standardannahmen – wie Excel üblich)
     notar_pct: 0.015,
     makler_ankauf_pct: 0.036,
     grest_pct: 0.065,
@@ -240,10 +218,84 @@ function compute(deal){
   };
 }
 
+// ---------- UI helpers ----------
+const $ = (sel) => document.querySelector(sel);
+
+function ampBadge(marge){
+  if (!isFinite(marge)) return `<span class="badge">–</span>`;
+  if (marge > 0.20) return `<span class="badge badge--ok">OK</span>`;
+  if (marge >= 0.10) return `<span class="badge badge--warn">Grenze</span>`;
+  return `<span class="badge badge--bad">No-Go</span>`;
+}
+
+function card(title, inner){
+  return `<div class="card"><div class="card__title">${title}</div>${inner}</div>`;
+}
+
+// Eingabefelder optisch markieren (hellblau)
+function inputField(label, key, value, hint){
+  return `
+    <div class="field">
+      <label><span>${label}</span><small>${hint || ""}</small></label>
+      <input class="ff-input" type="number" inputmode="decimal" value="${value}" data-key="${key}" />
+    </div>`;
+}
+function textField(label, key, value, hint){
+  return `
+    <div class="field">
+      <label><span>${label}</span><small>${hint || ""}</small></label>
+      <input class="ff-input" type="text" value="${value || ""}" data-tkey="${key}" />
+    </div>`;
+}
+function readonlyRow(label, value){
+  return `<div class="row"><div class="l">${label}</div><div class="r">${value}</div></div>`;
+}
+
+function ensureInputStyle(){
+  // minimaler Inline-Style-Injector (hellblau) – unabhängig von styles.css
+  if (document.getElementById("ff-input-style")) return;
+  const s = document.createElement("style");
+  s.id = "ff-input-style";
+  s.textContent = `
+    .ff-input{
+      background: rgba(59,130,246,.10);
+      border-color: rgba(59,130,246,.25) !important;
+      color: inherit;
+    }
+    .ff-input:focus{
+      outline: none;
+      box-shadow: 0 0 0 4px rgba(59,130,246,.15);
+    }
+  `;
+  document.head.appendChild(s);
+}
+
 // ---------- Export (PDF + Excel/CSV) ----------
+function safeFileName(s){
+  return String(s || "deal")
+    .toLowerCase()
+    .replace(/[^a-z0-9äöüß\-_ ]/gi, "")
+    .trim()
+    .replace(/\s+/g, "-")
+    .slice(0, 60) || "deal";
+}
+
+function downloadText(filename, content, mime="text/plain;charset=utf-8"){
+  const blob = new Blob([content], { type: mime });
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement("a");
+  a.href = url;
+  a.download = filename;
+  document.body.appendChild(a);
+  a.click();
+  a.remove();
+  URL.revokeObjectURL(url);
+}
+
 function exportCsvForDeal(deal){
   const c = compute(deal);
 
+  // Flach als Key/Value + Verhandlungstabelle; Excel öffnet CSV direkt
   const rows = [
     ["Deal", deal.name],
     ["Ort", deal.city],
@@ -301,7 +353,7 @@ function exportCsvForDeal(deal){
     rows.push([x.r, x.INVEST_r, x.Gewinn_g_r, x.Marge_g_r, x.Gewinn_h_r, x.Marge_h_r]);
   });
 
-  // deutsches Excel: Semikolon-Trenner
+  // CSV mit Semikolon für deutsches Excel
   const csv = rows
     .map(r => r.map(v => `"${String(v ?? "").replace(/"/g,'""')}"`).join(";"))
     .join("\n");
@@ -312,6 +364,7 @@ function exportCsvForDeal(deal){
 function exportPdfForDeal(deal){
   const c = compute(deal);
 
+  // Druckoptimierter Report in neuem Fenster (Browser-„Als PDF speichern“)
   const html = `
   <html lang="de">
   <head>
@@ -396,57 +449,6 @@ function exportPdfForDeal(deal){
   w.document.open();
   w.document.write(html);
   w.document.close();
-}
-
-// ---------- UI helpers ----------
-const $ = (sel) => document.querySelector(sel);
-
-function ampBadge(marge){
-  if (!isFinite(marge)) return `<span class="badge">–</span>`;
-  if (marge > 0.20) return `<span class="badge badge--ok">OK</span>`;
-  if (marge >= 0.10) return `<span class="badge badge--warn">Grenze</span>`;
-  return `<span class="badge badge--bad">No-Go</span>`;
-}
-
-function card(title, inner){
-  return `<div class="card"><div class="card__title">${title}</div>${inner}</div>`;
-}
-
-// Eingabefelder optisch markieren (Schwarz/Gelb)
-function inputField(label, key, value, hint){
-  return `
-    <div class="field">
-      <label><span>${label}</span><small>${hint || ""}</small></label>
-      <input class="ff-input" type="number" inputmode="decimal" value="${value}" data-key="${key}" />
-    </div>`;
-}
-function textField(label, key, value, hint){
-  return `
-    <div class="field">
-      <label><span>${label}</span><small>${hint || ""}</small></label>
-      <input class="ff-input" type="text" value="${value || ""}" data-tkey="${key}" />
-    </div>`;
-}
-function readonlyRow(label, value){
-  return `<div class="row"><div class="l">${label}</div><div class="r">${value}</div></div>`;
-}
-
-function ensureInputStyle(){
-  if (document.getElementById("ff-input-style")) return;
-  const s = document.createElement("style");
-  s.id = "ff-input-style";
-  s.textContent = `
-    .ff-input{
-      background: rgba(246,201,14,.14);
-      border-color: rgba(246,201,14,.35) !important;
-      color: var(--text);
-    }
-    .ff-input:focus{
-      outline: none;
-      box-shadow: 0 0 0 4px rgba(246,201,14,.18);
-    }
-  `;
-  document.head.appendChild(s);
 }
 
 // ---------- App state ----------
@@ -549,7 +551,7 @@ function renderDealTab(){
 
   const el = $("#deal");
   el.innerHTML = [
-    card("Eingaben (gelb markiert) – wie die Excel-Felder", `
+    card("Eingaben (hellblau) – wie die Excel-Felder", `
       <div class="grid grid--2">
         ${textField("Deal-Name", "name", d.name)}
         ${textField("Stadt/Ort", "city", d.city)}
@@ -716,7 +718,7 @@ function renderRentTab(){
   const c = compute(d);
 
   $("#rent").innerHTML = [
-    card("Vermietung – Eingaben (gelb markiert)", `
+    card("Vermietung – Eingaben (hellblau)", `
       <div class="grid grid--2">
         ${inputField("Pot. Miete", "pot_miete_qm", d.pot_miete_qm, "€/m²")}
         ${inputField("Käufer Zins+Tilg p.a.", "kaeufer_zins_tilg_pa", d.kaeufer_zins_tilg_pa*100, "%")}
@@ -796,8 +798,8 @@ function renderScenariosTab(){
         <button class="btn btn--primary" id="btnCreate2">Neuer Deal</button>
         <button class="btn" id="btnExportPdf">PDF Export</button>
         <button class="btn" id="btnExportCsv">Excel Export (CSV)</button>
-        <button class="btn" id="btnExport">Export JSON</button>
-        <button class="btn" id="btnImport">Import JSON</button>
+        <button class="btn" id="btnExport">Export JSON (anzeigen)</button>
+        <button class="btn" id="btnImport">Import JSON (einfügen)</button>
       </div>
       <div id="ioArea" style="display:none;margin-top:10px">
         <textarea id="ioText" style="width:100%;min-height:160px;padding:12px;border-radius:14px;border:1px solid var(--line);font-family:ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;"></textarea>
@@ -812,9 +814,12 @@ function renderScenariosTab(){
   ].join("");
 
   $("#btnCreate2").onclick = createDeal;
+
+  // Exports
   $("#btnExportPdf").onclick = ()=> exportPdfForDeal(activeDeal());
   $("#btnExportCsv").onclick = ()=> exportCsvForDeal(activeDeal());
 
+  // JSON IO
   $("#btnExport").onclick = ()=>{
     $("#ioArea").style.display = "block";
     $("#ioText").value = exportJson;
@@ -883,7 +888,6 @@ document.querySelectorAll(".tab").forEach(btn=>{
   btn.addEventListener("click", ()=>{
     document.querySelectorAll(".tab").forEach(b=>b.classList.remove("tab--active"));
     btn.classList.add("tab--active");
-
     const t = btn.dataset.tab;
     document.querySelectorAll(".panel").forEach(p=>p.classList.remove("panel--active"));
     document.getElementById(t).classList.add("panel--active");
