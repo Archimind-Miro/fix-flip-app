@@ -547,19 +547,20 @@ function renderDealTab(){
       </div>
 
       <div class="hr"></div>
-      <div class="grid grid--2">
-        ${inputField("Kaufpreis", "kaufpreis", d.kaufpreis, "EUR")}
-        ${inputField("Wohnfläche", "wohnflaeche", d.wohnflaeche, "m²")}
-        ${inputField('Marktpreis "gering"', "marktpreis_g", d.marktpreis_g, "€/m²")}
-        ${inputField('Marktpreis "hoch"', "marktpreis_h", d.marktpreis_h, "€/m²")}
-      </div>
+   <div class="grid grid--2">
+  ${inputField("Kaufpreis", "kaufpreis", d.kaufpreis, "EUR")}
+  ${inputField("Wohnfläche", "wohnflaeche", d.wohnflaeche, "m²")}
+  ${inputField('Marktpreis "gering"', "marktpreis_g", d.marktpreis_g, "€/m²")}
+  ${inputField('Marktpreis "hoch"', "marktpreis_h", d.marktpreis_h, "€/m²")}
+</div>
 
-      <div class="subhint" style="margin-top:10px">
-        Schnell prüfen: 
-        <a class="btn btn--ghost" href="${MARKETPRICE_URL}" target="_blank" rel="noopener noreferrer">
-          Immowelt Marktpreise öffnen
-        </a>
-      </div>
+<div class="subhint" style="margin-top:10px">
+  Schnell prüfen: 
+  <a class="btn btn--ghost" href="${MARKETPRICE_URL}" target="_blank" rel="noopener noreferrer">
+    Immowelt Marktpreise öffnen
+  </a>
+</div>
+
 
 
       <div class="hr"></div>
