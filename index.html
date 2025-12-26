@@ -1,0 +1,45 @@
+<!doctype html>
+<html lang="de">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width,initial-scale=1" />
+  <title>Fix & Flip Rechner</title>
+
+  <link rel="stylesheet" href="styles.css" />
+  <link rel="manifest" href="manifest.webmanifest" />
+  <meta name="theme-color" content="#111827" />
+</head>
+<body>
+  <header class="topbar">
+    <div class="topbar__title">
+      <div class="h1">Fix & Flip Rechner</div>
+      <div class="sub">Mobile App (PWA) – lokal gespeichert</div>
+    </div>
+    <div class="topbar__actions">
+      <button id="btnNewDeal" class="btn btn--primary">Neuer Deal</button>
+    </div>
+  </header>
+
+  <nav class="tabs" aria-label="Navigation">
+    <button class="tab tab--active" data-tab="deal">Deal</button>
+    <button class="tab" data-tab="results">Ergebnisse</button>
+    <button class="tab" data-tab="negotiation">Verhandlung</button>
+    <button class="tab" data-tab="rent">Vermietung</button>
+    <button class="tab" data-tab="scenarios">Szenarien</button>
+  </nav>
+
+  <main class="wrap">
+    <section id="deal" class="panel panel--active"></section>
+    <section id="results" class="panel"></section>
+    <section id="negotiation" class="panel"></section>
+    <section id="rent" class="panel"></section>
+    <section id="scenarios" class="panel"></section>
+  </main>
+
+  <footer class="footer">
+    <span>Hinweis: Speicherung lokal im Browser (localStorage). Export/Import im Szenarien-Tab.</span>
+  </footer>
+
+  <script src="app.js"></script>
+</body>
+</html>
