@@ -1,6 +1,8 @@
 /*
-Fix & Flip Rechner – app.js (komplett)
-Fixes:
+Fix & Flip Rechner – app.js (komplett) – v5
+Änderung: Bundesland-Auswahl -> setzt Grunderwerbsteuer (GrESt) automatisch.
+
+Fixes (beibehalten):
 1) Kein Fokus-Springen beim Tippen: Deal-Tab wird beim Input NICHT neu gerendert.
 2) Live-Berechnung: Beim Input werden nur berechnete Tabs neu gerendert + Deal-Snippet per DOM aktualisiert.
 3) Lesbarkeit: Keine dunklen Overrides, keine var(--text)-Abhängigkeit.
@@ -11,11 +13,35 @@ Hinweis:
 - Prozentfelder: Eingabe "1,5" => 1.5% => intern 0.015. Eingabe "0,015" bleibt 0.015.
 */
 
-const LS_KEY = "ff_deals_v4";
-const LS_ACTIVE = "ff_active_deal_v4";
-const LS_COMPARE = "ff_compare_v4";
+const LS_KEY = "ff_deals_v5";
+const LS_ACTIVE = "ff_active_deal_v5";
+const LS_COMPARE = "ff_compare_v5";
 
 const DISCOUNTS = [0.10,0.15,0.20,0.25,0.30,0.35,0.40,0.45];
+
+// ---------- GrESt nach Bundesland (Stand: 2025-08) ----------
+const GREST_BY_STATE = {
+  "Baden-Württemberg": 0.050,
+  "Bayern": 0.035,
+  "Berlin": 0.060,
+  "Brandenburg": 0.065,
+  "Bremen": 0.055,
+  "Hamburg": 0.055,
+  "Hessen": 0.060,
+  "Mecklenburg-Vorpommern": 0.060,
+  "Niedersachsen": 0.050,
+  "Nordrhein-Westfalen": 0.065,
+  "Rheinland-Pfalz": 0.050,
+  "Saarland": 0.065,
+  "Sachsen": 0.055,
+  "Sachsen-Anhalt": 0.050,
+  "Schleswig-Holstein": 0.065,
+  "Thüringen": 0.050
+};
+const STATES = Object.keys(GREST_BY_STATE);
+function grestForState(state){
+  return GREST_BY_STATE[state] ?? 0.065; // Fallback
+}
 
 // ---------- Helpers ----------
 const $ = (sel) => document.querySelector(sel);
@@ -57,6 +83,7 @@ function downloadText(filename, content, mime="text/plain;charset=utf-8"){
 
 // ---------- Defaults ----------
 function defaultDeal(){
+  const defaultState = "Nordrhein-Westfalen";
   return {
     id: uid(),
     name: "Blanko Deal",
@@ -69,10 +96,13 @@ function defaultDeal(){
     marktpreis_g: 0,
     marktpreis_h: 0,
 
+    // Bundesland (GrESt automatisch)
+    bundesland: defaultState,
+
     // Ankauf-NK
     notar_pct: 0.015,
     makler_ankauf_pct: 0.036,
-    grest_pct: 0.065,
+    grest_pct: grestForState(defaultState),
 
     // Renovierung
     entruempelung: 0,
@@ -250,8 +280,6 @@ function row(label, value){
 }
 function inputField(label, key, value, hint, opts={}){
   const { isPct=false } = opts;
-  // WICHTIG: type="text" verhindert Cursor-Springen durch Browser-Number-Parsing/Reflow
-  // Wir rendern initial einen Anzeige-Wert, aber beim Tippen ändern wir input.value NICHT mehr.
   const display = (isPct ? (Number(value)*100) : value);
   return `
     <div class="field">
@@ -267,6 +295,15 @@ function textField(label, key, value, hint){
       <input class="ff-input" type="text" value="${value || ""}" data-tkey="${key}" autocomplete="off" />
     </div>`;
 }
+function selectField(label, key, value, options, hint){
+  return `
+    <div class="field">
+      <label><span>${label}</span><small>${hint || ""}</small></label>
+      <select class="ff-input" data-skey="${key}">
+        ${options.map(o => `<option value="${o}" ${String(o)===String(value) ? "selected" : ""}>${o}</option>`).join("")}
+      </select>
+    </div>`;
+}
 
 // ---------- Export ----------
 function exportCsvForDeal(deal){
@@ -275,6 +312,7 @@ function exportCsvForDeal(deal){
   const rows = [
     ["Deal", deal.name],
     ["Ort", deal.city],
+    ["Bundesland", deal.bundesland || ""],
     ["Zeitpunkt", new Date().toLocaleString("de-DE")],
     ["", ""],
 
@@ -364,7 +402,7 @@ function exportPdfForDeal(deal){
   <body>
     <button onclick="window.print()">Als PDF drucken / speichern</button>
     <h1>${deal.name}</h1>
-    <p class="muted">${deal.city || ""} • ${new Date().toLocaleString("de-DE")}</p>
+    <p class="muted">${deal.city || ""} • ${deal.bundesland || ""} • ${new Date().toLocaleString("de-DE")}</p>
 
     <div class="grid">
       <div class="card">
@@ -382,6 +420,8 @@ function exportPdfForDeal(deal){
         <h3>Inputs (Kurz)</h3>
         <div class="row"><div class="l">Kaufpreis</div><div class="r">${deEUR(clamp0(deal.kaufpreis))}</div></div>
         <div class="row"><div class="l">Wohnfläche</div><div class="r">${clamp0(deal.wohnflaeche)} m²</div></div>
+        <div class="row"><div class="l">Bundesland</div><div class="r">${deal.bundesland || ""}</div></div>
+        <div class="row"><div class="l">GrESt-Satz</div><div class="r">${dePct(clamp0(deal.grest_pct))}</div></div>
         <div class="row"><div class="l">Markt €/m² (g/h)</div><div class="r">${clamp0(deal.marktpreis_g)} / ${clamp0(deal.marktpreis_h)}</div></div>
         <div class="row"><div class="l">Reno gesamt</div><div class="r">${deEUR(c.RenoGesamt)}</div></div>
         <div class="row"><div class="l">Finanzierung gesamt</div><div class="r">${deEUR(c.FinGesamt)}</div></div>
@@ -433,6 +473,14 @@ if (!deals || deals.length === 0) {
   saveDeals(deals);
   setActiveId(d.id);
 } else {
+  // Migration: Bundesland ergänzen, falls alte Deals existieren
+  let changed = false;
+  deals.forEach(d=>{
+    if (!d.bundesland) { d.bundesland = "Nordrhein-Westfalen"; changed = true; }
+    if (!isFinite(d.grest_pct) || d.grest_pct === 0) { d.grest_pct = grestForState(d.bundesland); changed = true; }
+  });
+  if (changed) saveDeals(deals);
+
   if (!getActiveId()) setActiveId(deals[0].id);
 }
 
@@ -450,10 +498,8 @@ const pctFields = new Set([
 ]);
 
 function parseNumericInput(raw){
-  // Erlaubt: "1.234,56" / "1234.56" / "1234" / ""
   const s = String(raw ?? "").trim().replace(/\s/g,"");
   if (!s) return 0;
-  // wenn beides vorkommt: entferne Tausenderpunkte, Komma -> Punkt
   const normalized = s.includes(",") ? s.replace(/\./g,"").replace(",", ".") : s;
   const n = Number(normalized);
   return isFinite(n) ? Math.max(0, n) : 0;
@@ -466,7 +512,6 @@ function applyField(key, rawValue, isPct){
   let num = parseNumericInput(rawValue);
 
   if (isPct || pctFields.has(key)) {
-    // Heuristik: 1.5 => 1.5% => 0.015; 0.015 bleibt 0.015
     if (num > 1) num = num / 100;
   }
 
@@ -481,13 +526,10 @@ function renderDealTab(){
   const d = activeDeal();
   if (!d) return;
 
-  // Nur einmal den Deal-Tab DOM aufbauen (Inputs bleiben stabil)
-  // Bei Deal-Wechsel rendern wir neu.
   const el = $("#deal");
   const currentId = el?.dataset?.dealId;
 
   if (dealTabMounted && currentId === d.id) {
-    // Nur Read-only Snippet refreshen
     updateDealSnippet();
     return;
   }
@@ -516,7 +558,8 @@ function renderDealTab(){
       <div class="grid grid--2">
         ${inputField("Notar+Grundbuch", "notar_pct", d.notar_pct, "%", {isPct:true})}
         ${inputField("Makler Ankauf", "makler_ankauf_pct", d.makler_ankauf_pct, "%", {isPct:true})}
-        ${inputField("GrESt", "grest_pct", d.grest_pct, "%", {isPct:true})}
+        ${selectField("Bundesland (GrESt)", "bundesland", d.bundesland || "Nordrhein-Westfalen", STATES, "setzt GrESt automatisch")}
+        ${inputField("GrESt", "grest_pct", d.grest_pct, "% (auto)", {isPct:true})}
       </div>
 
       <div class="hr"></div>
@@ -596,7 +639,7 @@ function renderDealTab(){
     `)
   ].join("");
 
-  // Delegate input handling (nur ein Listener, kein Re-Render)
+  // Delegate input handling
   el.addEventListener("input", onDealTabInput);
   el.addEventListener("change", onDealTabInput);
 
@@ -604,7 +647,6 @@ function renderDealTab(){
   el.querySelectorAll("button[data-switch]").forEach(btn=>{
     btn.addEventListener("click", ()=>{
       setActiveId(btn.dataset.switch);
-      // Deal-Tab muss neu aufgebaut werden (andere Values)
       dealTabMounted = false;
       renderAll(false);
     });
@@ -613,13 +655,29 @@ function renderDealTab(){
   $("#btnDup").onclick = ()=> duplicateDeal(d.id);
   $("#btnDel").onclick = ()=> { if (confirm("Deal wirklich löschen?")) deleteDeal(d.id); };
 
-  // Einmal initiale Snippet-Refresh
   updateDealSnippet();
 }
 
 function onDealTabInput(e){
   const t = e.target;
   if (!t) return;
+
+  // Select (Bundesland)
+  if (t.matches("select[data-skey]")) {
+    const key = t.dataset.skey;
+    if (key === "bundesland") {
+      const d = activeDeal();
+      if (!d) return;
+      d.bundesland = String(t.value || "");
+      d.grest_pct = grestForState(d.bundesland); // Auto-set
+      persist();
+
+      // Nur berechnete Tabs, kein Deal Re-Render -> Fokus bleibt stabil
+      renderComputedOnly();
+      updateDealSnippet();
+      return;
+    }
+  }
 
   // Textfelder
   if (t.matches("input[data-tkey]")) {
@@ -628,10 +686,7 @@ function onDealTabInput(e){
     if (!d) return;
     d[key] = String(t.value ?? "");
     persist();
-
-    // keine Deal-Neurender: nur computed Tabs
     renderComputedOnly();
-    // Snippet (VK/INV) hängt ggf. am Dealname nicht, aber stört nicht
     updateDealSnippet();
     return;
   }
@@ -643,7 +698,6 @@ function onDealTabInput(e){
 
     applyField(key, t.value, isPct);
 
-    // KEIN renderDealTab() hier -> kein Fokusverlust!
     renderComputedOnly();
     updateDealSnippet();
   }
@@ -675,7 +729,7 @@ function renderResultsTab(){
       <div class="headerLine">
         <div>
           <div class="titleStrong">${d.name}</div>
-          <div class="subtle">${d.city || ""}</div>
+          <div class="subtle">${d.city || ""} ${d.bundesland ? "• " + d.bundesland : ""}</div>
         </div>
         <div>${ampBadge(c.Marge_g)}</div>
       </div>
@@ -753,7 +807,6 @@ function renderRentTab(){
     `)
   ].join("");
 
-  // Rent-Inputs -> gleiche Logik wie DealTab, aber hier ist Re-Render ok (anderer Tab)
   $("#rent").querySelectorAll("input[data-key]").forEach(inp=>{
     inp.addEventListener("input",(e)=>{
       const key = e.target.dataset.key;
@@ -776,7 +829,7 @@ function renderScenariosTab(){
         <div class="headerLine">
           <div>
             <div class="titleStrong">${d.name}</div>
-            <div class="subtle">${d.city || ""}</div>
+            <div class="subtle">${d.city || ""} ${d.bundesland ? "• " + d.bundesland : ""}</div>
           </div>
           <label class="chip">
             <input type="checkbox" data-compare="${d.id}" ${checked ? "checked" : ""}/>
@@ -857,7 +910,11 @@ function renderScenariosTab(){
     try{
       const parsed = JSON.parse($("#ioText").value);
       if (!Array.isArray(parsed)) throw new Error("JSON muss ein Array sein.");
-      parsed.forEach(x=>{ if (!x.id) x.id = uid(); });
+      parsed.forEach(x=>{
+        if (!x.id) x.id = uid();
+        if (!x.bundesland) x.bundesland = "Nordrhein-Westfalen";
+        if (!isFinite(x.grest_pct) || x.grest_pct === 0) x.grest_pct = grestForState(x.bundesland);
+      });
       deals = parsed;
       persist();
       setActiveId(deals[0]?.id || defaultDeal().id);
